@@ -105,7 +105,7 @@ def _discover_records(roots: list[Path]) -> list[SkillRecord]:
 def _has_trigger_cue(description: str) -> bool:
     return bool(
         re.search(
-            r"\b(?:use|trigger|invoke|when|whenever|asks?|mentions?)\b|(?:使用|触发|当用户|用户提到|适用于|场景)",
+            r"\b(?:use|trigger|invoke|when|whenever|asks?|mentions?)\b|(?:使用|触发|当用户|用户提到|适用于|用于|场景)",
             description,
             re.IGNORECASE,
         )

@@ -67,7 +67,7 @@ def main() -> int:
 
     if "config" in args.modules:
         try:
-            modules.append(audit_config(codex_home))
+            modules.append(audit_config(codex_home, project))
         except Exception as error:  # module isolation is part of report coverage
             modules.append(failed_module("config", error))
 

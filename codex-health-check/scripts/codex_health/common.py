@@ -118,11 +118,17 @@ def find_high_risk_text(text: str) -> list[str]:
 
 
 def relative_markdown_links(text: str) -> list[str]:
-    links = re.findall(r"\[[^\]]+\]\(([^)]+)\)", text)
+    without_fences = re.sub(r"```.*?```|~~~.*?~~~", "", text, flags=re.DOTALL)
+    links = re.findall(r"\[[^\]]+\]\(([^)]+)\)", without_fences)
     result: list[str] = []
     for link in links:
         target = link.split("#", 1)[0].strip()
-        if not target or "://" in target or target.startswith(("#", "mailto:")):
+        if (
+            not target
+            or target.upper() in {"URL", "PATH", "LINK"}
+            or "://" in target
+            or target.startswith(("#", "mailto:", "<"))
+        ):
             continue
         result.append(target.replace("%20", " "))
     return result

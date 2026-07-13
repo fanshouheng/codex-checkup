@@ -83,10 +83,24 @@ def _retained_lines(payload: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _top_categories(findings: list[dict[str, Any]], limit: int = 3) -> list[dict[str, Any]]:
+    top: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in findings:
+        key = (item["domain"], item["title"])
+        if key in seen:
+            continue
+        seen.add(key)
+        top.append(item)
+        if len(top) >= limit:
+            break
+    return top
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     counts = payload["summary"]["priority_counts"]
     findings = payload["findings"]
-    top = findings[:3]
+    top = _top_categories(findings)
     lines = [
         "# Codex 全面体检报告",
         "",
