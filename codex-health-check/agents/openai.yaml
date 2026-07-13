@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex 全面体检"
+  short_description: "只读审核 Codex 配置、聊天、Skills 与项目流程"
+  default_prompt: "请使用 $codex-health-check 对我的 Codex 使用做一次全面体检，先只读分析，再给出有证据和优先级的建议。"
