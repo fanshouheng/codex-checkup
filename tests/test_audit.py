@@ -14,9 +14,10 @@ sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 
 from codex_health.config_audit import audit_config
 from codex_health.model import Finding, ModuleResult
+from codex_health.portfolio_audit import audit_portfolio
 from codex_health.project_audit import audit_project
 from codex_health.report import build_payload, render_markdown
-from codex_health.session_audit import SessionDataset, audit_sessions
+from codex_health.session_audit import SessionDataset, SessionStats, audit_sessions
 from codex_health.skill_audit import _has_trigger_cue, audit_skills
 
 
@@ -114,6 +115,42 @@ API_TOKEN = "actual-sensitive-value"
             self.assertNotIn("我说的是另一个模块", rendered)
             self.assertEqual(1, len(dataset.sessions))
 
+    def test_portfolio_requires_multiple_evidence_families_for_route_review(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp) / "private-project"
+            project.mkdir()
+            (project / "pyproject.toml").write_text("[project]\nname='fixture'\n", encoding="utf-8")
+            sessions = []
+            for index in range(5):
+                sessions.append(
+                    SessionStats(
+                        session_id=f"session-{index}",
+                        cwd=str(project),
+                        user_messages=10,
+                        correction_signals=2,
+                        tool_results=10,
+                        failed_tool_results=3,
+                    )
+                )
+            result = audit_portfolio(SessionDataset(sessions=sessions))
+            rules = {item.rule_id for item in result.findings}
+            self.assertTrue({"POR001", "POR002", "POR003", "POR004", "POR005"}.issubset(rules))
+            self.assertEqual(1, result.summary["projects_needing_direction_review"])
+            route = next(item for item in result.findings if item.rule_id == "POR005")
+            self.assertNotIn(str(project), route.evidence)
+            self.assertIn("不等于技术路线已被证实错误", route.evidence)
+
+    def test_portfolio_does_not_judge_route_from_one_small_session(self):
+        session = SessionStats(
+            session_id="small",
+            cwd=str(Path("sample-project")),
+            user_messages=5,
+            correction_signals=2,
+        )
+        result = audit_portfolio(SessionDataset(sessions=[session]))
+        self.assertNotIn("POR005", {item.rule_id for item in result.findings})
+        self.assertEqual(0, result.summary["projects_needing_direction_review"])
+
     def test_skill_checks_frontmatter_and_missing_resource(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "skills"
@@ -200,7 +237,7 @@ description: 处理示例数据
                     "--project",
                     str(project),
                     "--modules",
-                    "config,sessions,project",
+                    "config,sessions,portfolio,project",
                     "--output",
                     str(output),
                 ],
@@ -217,6 +254,7 @@ description: 处理示例数据
             self.assertNotIn(private_chat, combined)
             self.assertNotIn("super-secret-fixture-value", combined)
             self.assertIn("CFG003", combined)
+            self.assertIn('"module": "portfolio"', combined)
 
 
 if __name__ == "__main__":

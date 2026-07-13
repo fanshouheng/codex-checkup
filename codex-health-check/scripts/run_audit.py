@@ -8,13 +8,14 @@ from codex_health import __version__
 from codex_health.common import env_codex_home, path_alias
 from codex_health.config_audit import audit_config
 from codex_health.model import ModuleResult
+from codex_health.portfolio_audit import audit_portfolio
 from codex_health.project_audit import audit_project
 from codex_health.report import write_report
 from codex_health.session_audit import SessionDataset, audit_sessions
 from codex_health.skill_audit import audit_skills
 
 
-VALID_MODULES = ("config", "skills", "sessions", "project")
+VALID_MODULES = ("config", "skills", "sessions", "portfolio", "project")
 
 
 def parse_modules(value: str) -> list[str]:
@@ -77,13 +78,19 @@ def main() -> int:
         except Exception as error:
             modules.append(failed_module("skills", error))
 
-    if "sessions" in args.modules or "project" in args.modules:
+    if "sessions" in args.modules or "portfolio" in args.modules or "project" in args.modules:
         try:
             session_result, sessions = audit_sessions(codex_home, args.days, args.max_sessions)
         except Exception as error:
             session_result = failed_module("sessions", error)
         if "sessions" in args.modules:
             modules.append(session_result)
+
+    if "portfolio" in args.modules:
+        try:
+            modules.append(audit_portfolio(sessions))
+        except Exception as error:
+            modules.append(failed_module("portfolio", error))
 
     if "project" in args.modules:
         try:

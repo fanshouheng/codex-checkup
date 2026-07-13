@@ -13,6 +13,7 @@ DOMAIN_LABELS = {
     "config": "环境与配置",
     "skills": "指令与 Skills",
     "sessions": "聊天协作",
+    "portfolio": "跨项目组合",
     "project": "项目执行",
 }
 
