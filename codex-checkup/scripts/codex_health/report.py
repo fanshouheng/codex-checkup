@@ -103,7 +103,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     findings = payload["findings"]
     top = _top_categories(findings)
     lines = [
-        "# Codex 全面体检报告",
+        "# Codex 全景体检报告",
         "",
         f"生成时间：`{payload['generated_at']}`",
         f"范围：最近 {payload['metadata']['days']} 天；项目 `{payload['metadata']['project']}`；默认只读。",

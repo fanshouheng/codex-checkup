@@ -1,13 +1,13 @@
-# Codex 全面体检
+# Codex Checkup
 
-> **让 Codex 审计 Codex：找出你们怎样浪费时间、哪些规则互相打架、哪些项目做到一半被遗忘，并恢复下一步行动顺序。**
+> **Codex 全景体检：检查你怎么使用 Codex、Codex 怎么被配置，以及所有项目现在做到哪了。**
 
-![Version](https://img.shields.io/badge/version-0.6.0-111111)
+![Version](https://img.shields.io/badge/version-0.7.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![Local First](https://img.shields.io/badge/local--first-read--only-2E7D32)
 ![Tests](https://img.shields.io/badge/tests-14%20passing-2E7D32)
 
-`codex-health-check` 是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。
+`codex-checkup` 是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。
 
 它不是配置清理器，也不只是统计聊天次数。它把指定范围内的历史协作、Codex 配置、`AGENTS.md`、Skills、MCP 和项目现场串成证据链，回答四个真正影响工作的题目：
 
@@ -133,7 +133,7 @@ flowchart LR
 - 区分尚未开始、进行中、待验证、被阻塞、疑似遗忘、已完成、已归档和状态不明
 - 提取未完成事项、阻塞、依赖和下一步
 
-完整产品契约见 [audit-contract.md](codex-health-check/references/audit-contract.md)。
+完整产品契约见 [audit-contract.md](codex-checkup/references/audit-contract.md)。
 
 ## 不靠感觉下结论
 
@@ -167,7 +167,7 @@ flowchart LR
   -> 用完成证据和阻塞条件复测
 ```
 
-知识网络同时保存官方文档、OpenAI 官方 X 动态、具名开发者实践和社区反例。官方规范与社区技巧分层记录；高点赞不会自动升级成最佳实践。完整网络见 [codex-practice-network.md](codex-health-check/references/codex-practice-network.md)。
+知识网络同时保存官方文档、OpenAI 官方 X 动态、具名开发者实践和社区反例。官方规范与社区技巧分层记录；高点赞不会自动升级成最佳实践。完整网络见 [codex-practice-network.md](codex-checkup/references/codex-practice-network.md)。
 
 ## 快速开始
 
@@ -179,24 +179,26 @@ PowerShell：
 
 ```powershell
 git clone <repository-url> .\spcodex
-Copy-Item -Recurse .\spcodex\codex-health-check "$HOME\.codex\skills\codex-health-check"
+Copy-Item -Recurse .\spcodex\codex-checkup "$HOME\.codex\skills\codex-checkup"
 ```
 
 macOS / Linux：
 
 ```bash
 git clone <repository-url> ./spcodex
-cp -R ./spcodex/codex-health-check "$HOME/.codex/skills/codex-health-check"
+cp -R ./spcodex/codex-checkup "$HOME/.codex/skills/codex-checkup"
 ```
 
 要求 Python 3.11 或更高版本，不依赖第三方 Python 包。
+
+从 `codex-health-check` 旧版升级时，确认新 Skill 可用后移除旧目录；不要同时安装两个名称，否则可能出现重复触发。
 
 ### 第一次体检
 
 安装后直接对 Codex 说：
 
 ```text
-请使用 $codex-health-check 对我最近 30 天的 Codex 使用做一次只读全面体检。
+请使用 $codex-checkup 对我最近 30 天的 Codex 使用做一次只读全景体检。
 输出协作诊断、配置诊断、项目恢复地图和建议行动顺序。
 ```
 
@@ -219,13 +221,13 @@ cp -R ./spcodex/codex-health-check "$HOME/.codex/skills/codex-health-check"
 基础扫描：
 
 ```powershell
-python .\codex-health-check\scripts\run_audit.py --project . --days 30
+python .\codex-checkup\scripts\run_audit.py --project . --days 30
 ```
 
 只运行部分确定性模块：
 
 ```powershell
-python .\codex-health-check\scripts\run_audit.py `
+python .\codex-checkup\scripts\run_audit.py `
   --modules config,skills,sessions,portfolio,project `
   --output .\codex-health-report
 ```
@@ -233,7 +235,7 @@ python .\codex-health-check\scripts\run_audit.py `
 生成顺利样本与摩擦样本组成的私有协作证据包：
 
 ```powershell
-python .\codex-health-check\scripts\prepare_collaboration_evidence.py `
+python .\codex-checkup\scripts\prepare_collaboration_evidence.py `
   --days 30 `
   --max-samples 12
 ```
@@ -248,7 +250,7 @@ python .\codex-health-check\scripts\prepare_collaboration_evidence.py `
 
 ## 当前实现进度
 
-`0.6.0` 已经固定三个引擎、证据等级、项目状态机、统一输出契约和 Codex 实践知识网络，但三个引擎的自动化程度不同。
+`0.7.0` 以 Codex Checkup / Codex 全景体检为正式名称，并已固定三个引擎、证据等级、项目状态机、统一输出契约和 Codex 实践知识网络，但三个引擎的自动化程度不同。
 
 | 能力 | 当前状态 | 已实现 | 仍在建设 |
 | --- | --- | --- | --- |
@@ -263,7 +265,7 @@ python .\codex-health-check\scripts\prepare_collaboration_evidence.py `
 ## 项目结构
 
 ```text
-codex-health-check/
+codex-checkup/
 ├── SKILL.md                         # 一个安装和触发入口
 ├── agents/openai.yaml               # Codex UI 元数据
 ├── scripts/

@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL_ROOT = ROOT / "codex-health-check"
+SKILL_ROOT = ROOT / "codex-checkup"
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 
 from codex_health.config_audit import audit_config
@@ -64,8 +64,8 @@ class AuditTest(unittest.TestCase):
 
     def test_skill_ui_metadata_is_utf8_and_names_the_skill(self):
         text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn("Codex 全面体检", text)
-        self.assertIn("$codex-health-check", text)
+        self.assertIn("Codex 全景体检", text)
+        self.assertIn("$codex-checkup", text)
 
     def test_chinese_used_for_phrase_is_a_trigger_cue(self):
         self.assertTrue(_has_trigger_cue("用于开始复杂项目前的方案调研，也用于技术选型请求。"))

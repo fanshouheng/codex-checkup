@@ -31,7 +31,7 @@ def parse_modules(value: str) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="本地、只读的 Codex 全面体检")
+    parser = argparse.ArgumentParser(description="本地、只读的 Codex 全景体检")
     parser.add_argument("--codex-home", type=Path, default=env_codex_home(), help="Codex 用户目录")
     parser.add_argument("--project", type=Path, default=Path.cwd(), help="要审核的当前项目")
     parser.add_argument("--days", type=int, default=30, help="聊天统计天数（1-3650）")
