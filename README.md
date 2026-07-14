@@ -1,6 +1,6 @@
 # Codex Checkup
 
-> **Codex 全景体检：检查你怎么使用 Codex、Codex 怎么被配置，以及所有项目现在做到哪了。**
+> **让 Codex 审计 Codex：找出你们怎样浪费时间、哪些规则互相打架、哪些项目做到一半被遗忘，并恢复下一步行动顺序。**
 
 ![Version](https://img.shields.io/badge/version-0.7.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
