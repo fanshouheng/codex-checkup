@@ -23,6 +23,29 @@ from codex_health.skill_audit import _has_trigger_cue, audit_skills
 
 
 class AuditTest(unittest.TestCase):
+    def test_audit_contract_defines_engines_evidence_states_and_output(self):
+        contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for heading in ("交互协作引擎", "Codex 工作台引擎", "项目恢复引擎"):
+            self.assertIn(heading, contract)
+        for grade in ("`A`", "`B`", "`C`", "`D`", "`U`"):
+            self.assertIn(grade, contract)
+        for state in (
+            "`unknown`",
+            "`planned`",
+            "`in_progress`",
+            "`verification_pending`",
+            "`blocked`",
+            "`stale`",
+            "`completed`",
+            "`archived`",
+        ):
+            self.assertIn(state, contract)
+        for section in ("协作诊断", "配置诊断", "项目恢复地图", "建议行动顺序"):
+            self.assertIn(section, contract)
+        self.assertIn("references/audit-contract.md", skill)
+
     def test_skill_ui_metadata_is_utf8_and_names_the_skill(self):
         text = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         self.assertIn("Codex 全面体检", text)
@@ -159,10 +182,84 @@ API_TOKEN = "actual-sensitive-value"
             session_path = session_dir / "rollout-019f0000-0000-7000-8000-000000000099.jsonl"
             session_path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
 
-            payload = build_collaboration_evidence(codex_home, days=30, max_sessions=20, max_incidents=12)
-            kinds = {item["type"] for item in payload["incidents"]}
+            smooth_project = Path(temp) / "smooth-project"
+            smooth_project.mkdir()
+            smooth_rows = [
+                {"type": "session_meta", "payload": {"id": "019f0000-0000-7000-8000-000000000100", "cwd": str(smooth_project)}},
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "请修复导出按钮并完成验证"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "已完成导出按钮修复，测试和构建均通过，工作区干净。"}],
+                    },
+                },
+            ]
+            (session_dir / "rollout-019f0000-0000-7000-8000-000000000100.jsonl").write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in smooth_rows),
+                encoding="utf-8",
+            )
+
+            incomplete_rows = [
+                {"type": "session_meta", "payload": {"id": "019f0000-0000-7000-8000-000000000101", "cwd": str(smooth_project)}},
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "请导出最终 MP4"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "时间线已完成，但尚未导出 MP4。"}],
+                    },
+                },
+            ]
+            (session_dir / "rollout-019f0000-0000-7000-8000-000000000101.jsonl").write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in incomplete_rows),
+                encoding="utf-8",
+            )
+
+            skipped_action_rows = [
+                {"type": "session_meta", "payload": {"id": "019f0000-0000-7000-8000-000000000102", "cwd": str(smooth_project)}},
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "请检查并上传这个 Skill"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "已完成只读核对，但未上传 Skill。"}],
+                    },
+                },
+            ]
+            (session_dir / "rollout-019f0000-0000-7000-8000-000000000102.jsonl").write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in skipped_action_rows),
+                encoding="utf-8",
+            )
+
+            trailing_request_rows = [
+                {"type": "session_meta", "payload": {"id": "019f0000-0000-7000-8000-000000000103", "cwd": str(smooth_project)}},
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "请整理季度总结"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "季度总结已完成。"}],
+                    },
+                },
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "还要生成 Word 文件"}},
+            ]
+            (session_dir / "rollout-019f0000-0000-7000-8000-000000000103.jsonl").write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in trailing_request_rows),
+                encoding="utf-8",
+            )
+
+            payload = build_collaboration_evidence(codex_home, days=30, max_sessions=20, max_samples=12)
+            kinds = {item["type"] for item in payload["samples"]}
             self.assertTrue({"scope_control", "verification_gap", "autonomy_calibration", "success_pattern"}.issubset(kinds))
-            self.assertTrue(all(sum(1 for message in item["context"] if message["is_signal"]) == 1 for item in payload["incidents"]))
+            self.assertIn("successful_completion", kinds)
+            self.assertGreaterEqual(payload["sample_class_counts"]["successful"], 2)
+            self.assertGreaterEqual(payload["sample_class_counts"]["friction"], 1)
+            self.assertTrue(all(sum(1 for message in item["context"] if message["is_signal"]) == 1 for item in payload["samples"]))
             rendered = json.dumps(payload, ensure_ascii=False)
             self.assertTrue(payload["private"])
             self.assertIn("$PROJECT", rendered)
@@ -170,9 +267,12 @@ API_TOKEN = "actual-sensitive-value"
             self.assertNotIn("super-secret-token-value", rendered)
             self.assertNotIn("another-secret-value", rendered)
             self.assertNotIn("must-not-appear", rendered)
+            self.assertNotIn("时间线已完成，但尚未导出 MP4。", rendered)
+            self.assertNotIn("已完成只读核对，但未上传 Skill。", rendered)
+            self.assertNotIn("还要生成 Word 文件", rendered)
             signal_texts = [
                 message["text"]
-                for item in payload["incidents"]
+                for item in payload["samples"]
                 for message in item["context"]
                 if message["is_signal"]
             ]

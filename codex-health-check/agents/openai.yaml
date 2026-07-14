@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex 全面体检"
-  short_description: "诊断 Codex 协作问题并给出可执行优化方式"
-  default_prompt: "请使用 $codex-health-check 读取关键聊天并全面诊断我和 Codex 哪些协作方式不好、应该优化成什么样。"
+  short_description: "审计协作、配置和项目状态，恢复下一步行动顺序"
+  default_prompt: "请使用 $codex-health-check 对我的个人 Codex 工作台做一次只读全面体检，输出协作诊断、配置诊断、项目恢复地图和建议行动顺序。"

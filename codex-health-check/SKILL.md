@@ -1,6 +1,6 @@
 ---
 name: codex-health-check
-description: 对 Codex 做本地、只读、证据驱动的全面体检，审核配置、AGENTS.md、Skills、MCP、项目流程，并读取少量关键聊天上下文诊断哪些协作方式不好、根因是什么、应该优化成什么样。用户提到 Codex 体检、使用诊断、聊天复盘、协作不好、反复返工、配置优化、Skill 清理、项目路线不对、上下文浪费或想系统改善 Codex 使用方式时，都应使用本 Skill。
+description: 对个人 Codex 工作台做本地、只读、证据驱动的全面体检，审核历史协作、配置、AGENTS.md、Skills、MCP 和可识别项目状态，找出协作弯路、能力漏用、规则冲突、失效配置、未闭环或疑似遗忘项目，并恢复经用户确认后可执行的任务顺序。用户提到 Codex 体检、使用诊断、聊天复盘、协作返工、配置优化、Skill 清理、AGENTS.md 冲突、项目进度恢复、忘记做到哪里、项目路线复盘或下一步任务排序时，都应使用本 Skill。
 ---
 
 # Codex 全面体检
@@ -19,46 +19,44 @@ description: 对 Codex 做本地、只读、证据驱动的全面体检，审核
 
 ## 体检流程
 
-1. 确认范围：默认检查最近 30 天、当前项目和当前用户的 Codex 目录。用户指定日期、项目或模块时按其范围执行。
-2. 解析本 Skill 的实际目录，先运行基础扫描：
+1. 读取 [references/audit-contract.md](references/audit-contract.md)，严格使用其中的三个引擎、证据等级、项目状态和统一输出结构。
+2. 确认范围：默认检查最近 30 天、当前项目和当前用户的 Codex 目录。用户指定日期、项目或模块时按其范围执行；不要未经授权扫描整块磁盘。
+3. 解析本 Skill 的实际目录，先运行基础扫描：
 
 ```powershell
 python <skill-directory>/scripts/run_audit.py --project <current-project> --days 30
 ```
 
-3. 阅读生成的 `report.md` 和 `report.json`。不要用脚本未采集到的内容补齐配置、Skill 和项目结论。
-4. 用户明确要求审核聊天、协作、返工或“全面体检”时，继续深度协作诊断。若用户只说“检查 Codex”且没有提聊天，先说明下一步会读取少量脱敏聊天片段并征得同意。
-5. 生成私有证据包：
+4. 阅读生成的 `report.md` 和 `report.json`。把它们作为确定性证据，不要用脚本未采集到的内容补齐配置、Skill 和项目结论。
+5. 用户明确要求审核聊天、协作、返工或“全面体检”时，继续深度协作诊断。若用户只说“检查 Codex”且没有提聊天，先说明下一步会读取少量脱敏聊天片段并征得同意。
+6. 生成私有证据包：
 
 ```powershell
-python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --max-incidents 12
+python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --max-samples 12
 ```
 
-6. 明确告诉用户：私有证据包包含短小、尽力脱敏的聊天片段；读取后这些片段会进入当前 Codex 上下文，但不会写入可分享报告。然后读取 [references/collaboration-rubric.md](references/collaboration-rubric.md) 和 `.codex-health-private/collaboration-evidence.json`。
-7. 按诊断框架输出“当前协作方式 → 根因 → 理想协作方式 → 可直接采用的 prompt/规则 → 放置位置 → 验证方法”，并将完整结果写为基础报告同目录下的 `collaboration-diagnosis.md`。统计值只用于说明范围，不能代替语义判断。没有候选片段时明确报告样本不足，不编造协作问题。
-8. 对每个结论检查证据、置信度、主要责任归类和修改审批边界。先讲最值得处理的 3 项，不要用问题数量制造焦虑。
+7. 明确告诉用户：私有证据包同时包含顺利完成样本和摩擦样本，均为短小、尽力脱敏的聊天片段；读取后这些片段会进入当前 Codex 上下文，但不会写入可分享报告。然后读取 [references/collaboration-rubric.md](references/collaboration-rubric.md) 和 `.codex-health-private/collaboration-evidence.json`。
+8. 分别运行交互协作、Codex 工作台和项目恢复判断。项目只从会话工作目录、最近项目记录和用户指定目录发现；状态必须符合契约，证据不足时使用 `unknown`。
+9. 按契约生成 `health-check.md`。每个结论记录证据等级、置信度、覆盖范围、主要归因、放置位置、审批边界和验证方法。先讲最值得处理的 3 项，不要用问题数量制造焦虑。
 
-## 检查域
+## 三个引擎
 
-- **环境与配置**：配置是否可解析、权限组合是否过宽、是否存在过时字段、内联敏感值、失效项目路径和高风险 MCP 启动方式。
-- **指令与 Skills**：AGENTS.md 是否缺失或臃肿，Skill 是否可触发、重复、缺少资源、包含高风险命令或给上下文带来无效负担。
-- **聊天协作**：统计返工信号、连续“继续”开销、超长会话和失败工具结果。关键词指标只能作为协作信号，不能当作用户或模型能力评分。
-- **跨项目组合**：按项目汇总目标对齐、工具可靠性、知识沉淀和版本恢复点。至少两个独立证据族同时命中，才建议进行方向复盘。
-- **项目执行**：检查版本控制、未提交工作量、持久化项目规则和聊天中可见的返工趋势，判断流程风险而不是评价项目价值。
-- **安全与隐私**：检查配置与代理指令中的敏感值、破坏性命令和非必要权限。报告只显示命中的规则和位置，不显示敏感内容。
+- **交互协作引擎**：比较顺利与摩擦样本，诊断返工、范围、自治、验证、降级交付、任务切换和 Skill 使用情况。
+- **Codex 工作台引擎**：检查配置、用户/项目/嵌套 AGENTS.md、Skills、MCP 的质量、作用域、重复、冲突和实际遵守情况。
+- **项目恢复引擎**：恢复审计范围内项目的目标、状态、未完成项、阻塞、依赖和下一步，不评价项目商业价值。
 
-详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
+产品契约见 [references/audit-contract.md](references/audit-contract.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
 
 ## 输出要求
 
-回复用户时按以下顺序：
+回复用户并写入 `health-check.md` 时交付四份结果：
 
-1. **协作结论**：直接回答哪些配合方式不好，以及主要归因于用户输入、Codex 执行、共同流程还是环境工具。
-2. **应该优化成什么样**：最多 3 项，每项给理想状态、可复制文本、放置位置和验证方法。
-3. **推荐协作协议**：给出开始、执行、分歧和交付四个阶段的具体约定。
-4. **项目与工具问题**：再列配置、Skills、跨项目组合和当前项目发现；证据不足时明确说“暂不能判断路线是否错误”。
-5. **保留项与证据边界**：指出有效模式、无法读取部分和低置信度结论。
-6. **下一步**：给出最小改进顺序。涉及写配置、删 Skill、归档聊天或改项目时，先征得用户同意。
+1. **协作诊断**：保留哪些成功模式，哪些协作弯路需要改变，Skill 是否有确认使用、可能漏用或范围内未观察。
+2. **配置诊断**：配置关系、AGENTS.md 作用域与冲突、Skills/MCP 的重复、失效和风险。
+3. **项目恢复地图**：每个可识别项目的证据状态、已完成、未完成、阻塞和下一步。
+4. **建议行动顺序**：按用户目标、阻塞关系、收尾成本、疑似遗忘和系统性影响排序，并说明理由和完成条件。
+
+最后说明审计范围、`A/B/C/D/U` 证据分布和无法判断项。涉及写配置、删 Skill、归档聊天、关闭项目或修改项目时，先征得用户同意。
 
 ## 复测
 

@@ -1,6 +1,6 @@
 # Codex 全面体检 Skill
 
-这是一个本地优先、默认只读的 Codex 使用诊断 Skill。它从配置、指令、Skills、聊天协作和项目执行五个角度收集证据，再输出分优先级、带置信度的优化建议。
+这是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。它通过三个引擎检查历史协作、Codex 配置与指令体系，以及审计范围内可识别项目的执行状态，再恢复一份经用户确认后可继续执行的行动顺序。
 
 它刻意不做两件事：不上传聊天内容，不自动修改用户环境。体检报告只保留统计量、脱敏路径和规则命中信息。
 
@@ -13,6 +13,8 @@
 - 跨项目汇总目标对齐、工具可靠性、知识沉淀和 Git 恢复点，只把多证据项目列入方向复盘
 - 结合当前项目的 Git、AGENTS.md 和聊天样本给出流程建议
 - 同时生成便于阅读的 Markdown 和便于后续自动化的 JSON 报告
+
+完整体检按统一契约交付四份结果：协作诊断、配置诊断、项目恢复地图和建议行动顺序。三个引擎、证据等级、项目状态机及输出字段定义见 `codex-health-check/references/audit-contract.md`。
 
 ## 安装
 
@@ -50,7 +52,7 @@ python .\codex-health-check\scripts\run_audit.py --modules config,skills --outpu
 深度协作诊断单独生成私有证据包：
 
 ```powershell
-python .\codex-health-check\scripts\prepare_collaboration_evidence.py --days 30 --max-incidents 12
+python .\codex-health-check\scripts\prepare_collaboration_evidence.py --days 30 --max-samples 12
 ```
 
 私有证据包不应提交或分享。读取它会让其中的短聊天片段进入当前 Codex 上下文。

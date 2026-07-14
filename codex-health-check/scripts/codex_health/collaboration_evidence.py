@@ -33,6 +33,22 @@ SUCCESS_RE = re.compile(
     re.IGNORECASE,
 )
 NON_CORRECTION_REQUEST_RE = re.compile(r"(?:哪些|哪里|有没有|是否|怎么判断).{0,40}不对", re.IGNORECASE)
+COMPLETION_RE = re.compile(
+    r"(?:已完成|完成并|已经.{0,12}完成|已提交|已经提交|已生成|已经生成|已写入|已交付|处理完成|修复完成|工作区干净|\bcompleted\b|\bdone\b|\bdelivered\b)",
+    re.IGNORECASE,
+)
+VERIFIED_RE = re.compile(
+    r"(?:测试|验证|确认|构建|lint|test|工作区干净|启动成功|截图|预览|通过|已提交|git|build|verified|passed)",
+    re.IGNORECASE,
+)
+INCOMPLETE_RE = re.compile(
+    r"(?:尚未|还未|未完成|未(?:安装|上传|导出|提交|发布|执行|交付)|没有真正.{0,8}(?:提交|完成|导出)|仍需|还需要你|需要你提供|等待你|not yet|still need|pending user)",
+    re.IGNORECASE,
+)
+SUCCESS_DISQUALIFIER_RE = re.compile(
+    r"(?:不对|不是这样|还是不|跑偏|搞错|理解错|太.{0,12}(?:了|腔|像)|重新(?:写|做|改)|改一下|再改|不符合|不是我.{0,8}(?:要|的)|wrong|redo)",
+    re.IGNORECASE,
+)
 
 SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
@@ -67,11 +83,14 @@ class CandidateIncident:
     message_index: int
     messages: tuple[Message, ...]
     signal_offset: int
+    basis: str
 
 
 def _skip_message(text: str) -> bool:
     stripped = text.lstrip()
-    return stripped.startswith(("# AGENTS.md instructions", "<environment_context>", "<permissions instructions>"))
+    return stripped.startswith(
+        ("# AGENTS.md instructions", "<environment_context>", "<permissions instructions>", "<heartbeat>")
+    )
 
 
 def _read_messages(path: Path) -> tuple[str, str, list[Message]]:
@@ -198,22 +217,72 @@ def _session_candidates(path: Path, codex_home: Path) -> list[CandidateIncident]
             Message(item.role, _redact(item.text, codex_home, cwd))
             for item in messages[start:end]
         )
-        candidates.append(CandidateIncident(kind, session_ref, project, index, context, index - start))
+        candidates.append(
+            CandidateIncident(
+                kind,
+                session_ref,
+                project,
+                index,
+                context,
+                index - start,
+                "explicit_user_feedback",
+            )
+        )
     return candidates
 
 
-def build_collaboration_evidence(
-    codex_home: Path,
-    days: int = 30,
-    max_sessions: int = 300,
-    max_incidents: int = 12,
-) -> dict[str, Any]:
-    files = _session_files(codex_home, days, max_sessions)
-    candidates: list[CandidateIncident] = []
-    for path in files:
-        candidates.extend(_session_candidates(path, codex_home))
+def _successful_session_candidate(path: Path, codex_home: Path) -> CandidateIncident | None:
+    session_id, cwd, messages = _read_messages(path)
+    if not messages:
+        return None
+    continuation_indices = _continuation_indices(messages)
+    for index, message in enumerate(messages):
+        if message.role != "user":
+            continue
+        has_prior_assistant = any(item.role == "assistant" for item in messages[:index])
+        if has_prior_assistant and SUCCESS_DISQUALIFIER_RE.search(" ".join(message.text.split())):
+            return None
+        kind = "autonomy_calibration" if index in continuation_indices else _classify_user_message(message.text)
+        if kind and kind != "success_pattern":
+            return None
 
-    candidates.sort(key=lambda item: -INCIDENT_PRIORITY[item.kind])
+    assistant_indices = [index for index, message in enumerate(messages) if message.role == "assistant"]
+    user_indices = [index for index, message in enumerate(messages) if message.role == "user"]
+    if not assistant_indices or not user_indices:
+        return None
+    final_user_index = user_indices[-1]
+    tail_assistant_indices = [index for index in assistant_indices if index > final_user_index]
+    if not tail_assistant_indices:
+        return None
+    final_assistant_index = tail_assistant_indices[-1]
+    completion_text = " ".join(messages[index].text for index in tail_assistant_indices[-2:])
+    if not COMPLETION_RE.search(completion_text) or INCOMPLETE_RE.search(completion_text):
+        return None
+
+    selected_indices = {user_indices[0], final_assistant_index}
+    if len(user_indices) > 1:
+        selected_indices.add(user_indices[-1])
+    if len(tail_assistant_indices) > 1:
+        selected_indices.add(tail_assistant_indices[-2])
+    ordered = sorted(selected_indices)
+    context = tuple(
+        Message(messages[index].role, _redact(messages[index].text, codex_home, cwd))
+        for index in ordered
+    )
+    signal_offset = ordered.index(final_assistant_index)
+    basis = "completion_and_verification" if VERIFIED_RE.search(completion_text) else "completion_without_followup_correction"
+    return CandidateIncident(
+        "successful_completion",
+        short_hash(session_id),
+        safe_project_label(cwd) if cwd else "unknown",
+        final_assistant_index,
+        context,
+        signal_offset,
+        basis,
+    )
+
+
+def _select_with_kind_limit(candidates: list[CandidateIncident], limit: int) -> list[CandidateIncident]:
     selected: list[CandidateIncident] = []
     per_kind: dict[str, int] = defaultdict(int)
     seen: set[tuple[str, str, int]] = set()
@@ -224,12 +293,63 @@ def build_collaboration_evidence(
         seen.add(key)
         per_kind[candidate.kind] += 1
         selected.append(candidate)
-        if len(selected) >= max_incidents:
+        if len(selected) >= limit:
             break
+    return selected
+
+
+def _diverse_successes(candidates: list[CandidateIncident], limit: int) -> list[CandidateIncident]:
+    selected: list[CandidateIncident] = []
+    used_projects: set[str] = set()
+    for require_new_project in (True, False):
+        for candidate in candidates:
+            if candidate in selected:
+                continue
+            if require_new_project and candidate.project in used_projects:
+                continue
+            selected.append(candidate)
+            used_projects.add(candidate.project)
+            if len(selected) >= limit:
+                return selected
+    return selected
+
+
+def build_collaboration_evidence(
+    codex_home: Path,
+    days: int = 30,
+    max_sessions: int = 300,
+    max_samples: int = 12,
+) -> dict[str, Any]:
+    files = _session_files(codex_home, days, max_sessions)
+    friction_candidates: list[CandidateIncident] = []
+    success_candidates: list[CandidateIncident] = []
+    for path in files:
+        session_candidates = _session_candidates(path, codex_home)
+        friction_candidates.extend(item for item in session_candidates if item.kind != "success_pattern")
+        success_candidates.extend(item for item in session_candidates if item.kind == "success_pattern")
+        successful_session = _successful_session_candidate(path, codex_home)
+        if successful_session is not None:
+            success_candidates.append(successful_session)
+
+    friction_candidates.sort(key=lambda item: -INCIDENT_PRIORITY[item.kind])
+    success_candidates.sort(key=lambda item: item.basis != "completion_and_verification")
+    success_quota = min(len(success_candidates), max(1, max_samples // 3))
+    friction_quota = max_samples - success_quota
+    selected_friction = _select_with_kind_limit(friction_candidates, friction_quota)
+    remaining = max_samples - len(selected_friction)
+    selected_success = _diverse_successes(success_candidates, remaining)
+    selected = selected_friction + selected_success
+    if len(selected) < max_samples:
+        remaining_friction = [item for item in friction_candidates if item not in selected_friction]
+        selected.extend(_select_with_kind_limit(remaining_friction, max_samples - len(selected)))
 
     counts = Counter(item.kind for item in selected)
+    class_counts = Counter(
+        "successful" if item.kind in {"successful_completion", "success_pattern"} else "friction"
+        for item in selected
+    )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "private": True,
         "notice": "Contains short redacted chat excerpts. Reading this file places those excerpts in the current Codex context.",
@@ -237,13 +357,16 @@ def build_collaboration_evidence(
             "days": days,
             "session_files_considered": len(files),
             "max_sessions": max_sessions,
-            "max_incidents": max_incidents,
+            "max_samples": max_samples,
         },
-        "incident_count": len(selected),
-        "incident_type_counts": dict(sorted(counts.items())),
-        "incidents": [
+        "sample_count": len(selected),
+        "sample_class_counts": dict(sorted(class_counts.items())),
+        "sample_type_counts": dict(sorted(counts.items())),
+        "samples": [
             {
+                "sample_class": "successful" if item.kind in {"successful_completion", "success_pattern"} else "friction",
                 "type": item.kind,
+                "basis": item.basis,
                 "project": item.project,
                 "session_ref": item.session_ref,
                 "context": [
