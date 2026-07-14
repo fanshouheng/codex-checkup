@@ -1,6 +1,6 @@
 # Codex Checkup
 
-> **让 Codex 审计 Codex：找出你们怎样浪费时间、哪些规则互相打架、哪些项目做到一半被遗忘，并恢复下一步行动顺序。**
+> **让 Codex 审计 Codex：帮助你升级与 Codex 的协作方式，找出互相打架的规则和做到一半被遗忘的项目，并告诉你接下来最应该先做什么。**
 
 ![Version](https://img.shields.io/badge/version-0.7.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
