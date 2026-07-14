@@ -178,14 +178,14 @@ flowchart LR
 PowerShell：
 
 ```powershell
-git clone <repository-url> .\spcodex
+git clone https://github.com/fanshouheng/codex-checkup.git .\spcodex
 Copy-Item -Recurse .\spcodex\codex-checkup "$HOME\.codex\skills\codex-checkup"
 ```
 
 macOS / Linux：
 
 ```bash
-git clone <repository-url> ./spcodex
+git clone https://github.com/fanshouheng/codex-checkup.git ./spcodex
 cp -R ./spcodex/codex-checkup "$HOME/.codex/skills/codex-checkup"
 ```
 
