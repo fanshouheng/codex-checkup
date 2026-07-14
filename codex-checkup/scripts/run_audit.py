@@ -94,7 +94,7 @@ def main() -> int:
 
     if "project" in args.modules:
         try:
-            modules.append(audit_project(project, sessions))
+            modules.append(audit_project(project, sessions, codex_home))
         except Exception as error:
             modules.append(failed_module("project", error))
 

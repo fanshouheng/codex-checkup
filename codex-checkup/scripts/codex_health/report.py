@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .model import Finding, ModuleResult, sort_findings
+from .model import PRIORITY_ORDER, Finding, ModuleResult
 
 
 DOMAIN_LABELS = {
@@ -17,10 +17,86 @@ DOMAIN_LABELS = {
     "project": "项目执行",
 }
 
+PRACTICE_BY_RULE: dict[str, tuple[list[str], str]] = {
+    "CFG001": (["PRA018"], "official-confirmed"),
+    "CFG002": (["PRA018"], "official-confirmed"),
+    "CFG003": (["PRA018"], "official-confirmed"),
+    "CFG004": (["PRA008"], "official-confirmed"),
+    "CFG005": (["PRA008"], "local-only"),
+    "CFG006": (["PRA016", "PRA018"], "official-plus-practice"),
+    "SKL001": (["PRA010", "PRA011"], "official-confirmed"),
+    "SKL002": (["PRA010"], "official-confirmed"),
+    "SKL003": (["PRA011"], "official-confirmed"),
+    "SKL004": (["PRA011"], "local-only"),
+    "SKL005": (["PRA010"], "official-confirmed"),
+    "SKL006": (["PRA010", "PRA012"], "official-confirmed"),
+    "SKL007": (["PRA018"], "official-confirmed"),
+    "SES001": (["PRA001", "PRA015"], "local-only"),
+    "SES002": (["PRA001", "PRA003"], "official-plus-practice"),
+    "SES003": (["PRA004"], "official-confirmed"),
+    "SES004": (["PRA016"], "practice-supported"),
+    "PRJ001": (["PRA007"], "official-confirmed"),
+    "PRJ002": (["PRA007"], "official-confirmed"),
+    "PRJ003": (["PRA008", "PRA009"], "local-only"),
+    "PRJ004": (["PRA008"], "official-confirmed"),
+    "PRJ005": (["PRA003", "PRA020"], "local-only"),
+    "PRJ006": (["PRA018"], "official-confirmed"),
+    "PRJ007": (["PRA008"], "official-confirmed"),
+    "POR001": (["PRA001", "PRA015"], "local-only"),
+    "POR002": (["PRA016"], "practice-supported"),
+    "POR003": (["PRA008", "PRA009"], "local-only"),
+    "POR004": (["PRA007"], "official-confirmed"),
+    "POR005": (["PRA003", "PRA020"], "local-only"),
+}
+
+
+def _engine_for(module_name: str) -> str:
+    if module_name == "sessions":
+        return "collaboration"
+    if module_name in {"config", "skills"}:
+        return "workbench"
+    return "projects"
+
+
+def _finding_payload(item: Finding, module: ModuleResult) -> dict[str, Any]:
+    data = item.to_dict()
+    heuristic = item.rule_id.startswith(("SES", "POR")) or item.rule_id in {"PRJ003", "PRJ005"}
+    practice_refs, basis = PRACTICE_BY_RULE.get(item.rule_id, (["local-only"], "local-only"))
+    placement = {
+        "config": "config",
+        "skills": "Skill",
+        "sessions": "prompt、AGENTS.md 或验证流程",
+        "portfolio": "项目任务或项目 AGENTS.md",
+        "project": "项目任务、测试或项目 AGENTS.md",
+    }.get(module.name, "manual-review")
+    data.update(
+        {
+            "finding_id": item.rule_id,
+            "engine": _engine_for(module.name),
+            "evidence_grade": "C" if heuristic else "A",
+            "evidence_refs": [item.rule_id],
+            "coverage": {"module": module.name, "status": module.status},
+            "practice_refs": practice_refs,
+            "recommendation_basis": basis,
+            "placement": placement,
+            "approval_required": item.requires_approval,
+            "verification": f"修复后以相同范围重新运行 {module.name} 模块，并比较规则 {item.rule_id} 是否仍触发。",
+        }
+    )
+    return data
+
 
 def build_payload(metadata: dict[str, Any], modules: list[ModuleResult]) -> dict[str, Any]:
-    findings = sort_findings([finding for module in modules for finding in module.findings])
-    counts = Counter(item.priority for item in findings)
+    module_payloads: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    for module in modules:
+        module_data = module.to_dict()
+        module_findings = [_finding_payload(finding, module) for finding in module.findings]
+        module_data["findings"] = module_findings
+        module_payloads.append(module_data)
+        findings.extend(module_findings)
+    findings.sort(key=lambda item: (PRIORITY_ORDER[item["priority"]], item["domain"], item["rule_id"]))
+    counts = Counter(item["priority"] for item in findings)
     return {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -33,8 +109,8 @@ def build_payload(metadata: dict[str, Any], modules: list[ModuleResult]) -> dict
             "finding_count": len(findings),
             "priority_counts": {priority: counts.get(priority, 0) for priority in ("P0", "P1", "P2", "P3")},
         },
-        "modules": [module.to_dict() for module in modules],
-        "findings": [finding.to_dict() for finding in findings],
+        "modules": module_payloads,
+        "findings": findings,
     }
 
 
@@ -56,10 +132,12 @@ def _finding_lines(findings: list[dict[str, Any]]) -> list[str]:
                 f"### {index}. [{item['priority']}] {item['title']}",
                 "",
                 f"- 领域：{item['domain']} / 规则 `{item['rule_id']}` / 置信度：{item['confidence']}",
+                f"- 证据等级：`{item['evidence_grade']}` / 实践节点：{', '.join(item['practice_refs'])} / 建议依据：`{item['recommendation_basis']}`",
                 f"- 证据：{item['evidence']}",
                 f"- 影响：{item['impact']}",
                 f"- 建议：{item['recommendation']}",
                 f"- 边界：{approval}",
+                f"- 复测：{item['verification']}",
                 "",
             ]
         )

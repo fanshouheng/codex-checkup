@@ -14,7 +14,7 @@
 
 ## 深度协作诊断
 
-深度诊断会另外生成 `.codex-health-private/collaboration-evidence.json`。它保存少量顺利完成样本和摩擦事件前后的短消息，并对常见密钥、用户目录、Codex 目录和项目路径做尽力脱敏。
+深度诊断会另外生成 `.codex-health-private/collaboration-evidence.json`。它保存少量顺利完成样本和摩擦事件前后的短消息，并对常见 API 令牌、Bearer/JWT、数据库连接串、PEM 私钥、用户目录、Codex 目录和项目路径做尽力脱敏。
 
 该文件不是可分享报告，仍可能包含业务内容或脱敏器未识别的信息。读取它会让片段进入当前 Codex 上下文：
 

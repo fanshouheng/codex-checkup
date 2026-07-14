@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,9 +14,9 @@ SKILL_ROOT = ROOT / "codex-checkup"
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 
 from codex_health.config_audit import audit_config
-from codex_health.collaboration_evidence import build_collaboration_evidence
+from codex_health.collaboration_evidence import _redact, build_collaboration_evidence
 from codex_health.model import Finding, ModuleResult
-from codex_health.portfolio_audit import audit_portfolio
+from codex_health.portfolio_audit import _group_projects, audit_portfolio
 from codex_health.project_audit import audit_project
 from codex_health.report import build_payload, render_markdown
 from codex_health.session_audit import SessionDataset, SessionStats, audit_sessions
@@ -155,6 +156,61 @@ API_TOKEN = "actual-sensitive-value"
             self.assertNotIn("我说的是另一个模块", rendered)
             self.assertEqual(1, len(dataset.sessions))
 
+    def test_session_coverage_is_partial_for_unparsed_or_truncated_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            codex_home = Path(temp)
+            session_dir = codex_home / "sessions"
+            session_dir.mkdir()
+            for index in range(2):
+                row = {
+                    "type": "session_meta",
+                    "payload": {
+                        "id": f"019f0000-0000-7000-8000-00000000001{index}",
+                        "cwd": str(codex_home / f"project-{index}"),
+                    },
+                }
+                (session_dir / f"rollout-019f0000-0000-7000-8000-00000000001{index}.jsonl").write_text(
+                    json.dumps(row), encoding="utf-8"
+                )
+            (session_dir / "broken.jsonl").write_text("{not-json", encoding="utf-8")
+
+            unparsed_result, unparsed_data = audit_sessions(codex_home, days=30, max_sessions=10)
+            self.assertEqual("partial", unparsed_result.status)
+            self.assertEqual(3, unparsed_data.files_available)
+            self.assertEqual(1, unparsed_data.files_unparsed)
+
+            truncated_result, truncated_data = audit_sessions(codex_home, days=30, max_sessions=1)
+            self.assertEqual("partial", truncated_result.status)
+            self.assertTrue(truncated_data.truncated)
+            self.assertEqual(3, truncated_result.summary["session_files_available"])
+
+    def test_session_records_confirmed_skill_reads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            codex_home = Path(temp)
+            session_dir = codex_home / "sessions"
+            session_dir.mkdir()
+            rows = [
+                {
+                    "type": "session_meta",
+                    "payload": {"id": "019f0000-0000-7000-8000-000000000020", "cwd": str(codex_home)},
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "shell_command",
+                        "arguments": json.dumps(
+                            {"command": str(codex_home / "skills" / "codex-checkup" / "SKILL.md")}
+                        ),
+                    },
+                },
+            ]
+            path = session_dir / "rollout-019f0000-0000-7000-8000-000000000020.jsonl"
+            path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+            result, _ = audit_sessions(codex_home, days=30, max_sessions=10)
+            self.assertEqual(["codex-checkup"], result.summary["confirmed_skill_refs"])
+
     def test_collaboration_evidence_keeps_context_and_redacts_private_values(self):
         with tempfile.TemporaryDirectory() as temp:
             codex_home = Path(temp) / "codex-home"
@@ -203,6 +259,23 @@ API_TOKEN = "actual-sensitive-value"
             smooth_rows = [
                 {"type": "session_meta", "payload": {"id": "019f0000-0000-7000-8000-000000000100", "cwd": str(smooth_project)}},
                 {"type": "event_msg", "payload": {"type": "user_message", "message": "请修复导出按钮并完成验证"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "shell_command",
+                        "call_id": "verify-1",
+                        "arguments": json.dumps({"command": "python -m unittest"}),
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "call_id": "verify-1",
+                        "output": "Exit code: 0\nRan 4 tests - OK",
+                    },
+                },
                 {
                     "type": "response_item",
                     "payload": {
@@ -295,6 +368,62 @@ API_TOKEN = "actual-sensitive-value"
             self.assertNotIn("我要检查哪些项目路线不对，哪些流程不对", signal_texts)
             self.assertNotIn("发布时不要被看出来是这个项目改的", signal_texts)
 
+    def test_unverified_assistant_completion_is_not_a_success_sample(self):
+        with tempfile.TemporaryDirectory() as temp:
+            codex_home = Path(temp) / "codex"
+            session_dir = codex_home / "sessions"
+            session_dir.mkdir(parents=True)
+            rows = [
+                {
+                    "type": "session_meta",
+                    "payload": {"id": "019f0000-0000-7000-8000-000000000030", "cwd": str(Path(temp) / "p")},
+                },
+                {"type": "event_msg", "payload": {"type": "user_message", "message": "请修复并测试"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "shell_command",
+                        "call_id": "verify-failed",
+                        "arguments": json.dumps({"command": "python -m unittest"}),
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "call_id": "verify-failed",
+                        "output": "Exit code: 1\n1 failed, 3 passed",
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "已完成，测试和构建均通过。"}],
+                    },
+                },
+            ]
+            path = session_dir / "rollout-019f0000-0000-7000-8000-000000000030.jsonl"
+            path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
+
+            payload = build_collaboration_evidence(codex_home, days=30, max_sessions=10, max_samples=5)
+            self.assertNotIn("successful_completion", {item["type"] for item in payload["samples"]})
+
+    def test_private_evidence_redacts_pem_jwt_bearer_and_database_url(self):
+        fixture = (
+            "-----BEGIN OPENSSH PRIVATE KEY----- AAAAB3NzaFixture -----END OPENSSH PRIVATE KEY----- "
+            "Bearer abcdefghijklmnopqrstuvwxyz123456 "
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmaXh0dXJlIn0.signature123456 "
+            "postgresql://admin:super-secret@example.invalid/db"
+        )
+        redacted = _redact(fixture, Path.home() / ".codex", "")
+        self.assertNotIn("OPENSSH PRIVATE KEY", redacted)
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz123456", redacted)
+        self.assertNotIn("eyJhbGci", redacted)
+        self.assertNotIn("super-secret", redacted)
+
     def test_portfolio_requires_multiple_evidence_families_for_route_review(self):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp) / "private-project"
@@ -330,6 +459,68 @@ API_TOKEN = "actual-sensitive-value"
         result = audit_portfolio(SessionDataset(sessions=[session]))
         self.assertNotIn("POR005", {item.rule_id for item in result.findings})
         self.assertEqual(0, result.summary["projects_needing_direction_review"])
+
+    def test_portfolio_groups_subdirectories_by_git_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp) / "project"
+            api = project / "api"
+            web = project / "web"
+            api.mkdir(parents=True)
+            web.mkdir()
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            dataset = SessionDataset(
+                sessions=[SessionStats("api", cwd=str(api)), SessionStats("web", cwd=str(web))]
+            )
+            result = audit_portfolio(dataset)
+            self.assertEqual(1, result.summary["projects_seen"])
+
+    def test_portfolio_caches_project_normalization_for_repeated_cwd(self):
+        cwd = str(Path("repeated-project"))
+        sessions = [SessionStats("first", cwd=cwd), SessionStats("second", cwd=cwd)]
+
+        with patch(
+            "codex_health.portfolio_audit.canonical_project_path",
+            side_effect=lambda path: path.resolve(strict=False),
+        ) as normalize:
+            projects = _group_projects(sessions)
+
+        self.assertEqual(1, len(projects))
+        self.assertEqual(1, normalize.call_count)
+
+    def test_portfolio_is_partial_when_project_directory_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            available = Path(temp) / "available"
+            available.mkdir()
+            missing = Path(temp) / "missing"
+            dataset = SessionDataset(
+                sessions=[SessionStats("available", cwd=str(available)), SessionStats("missing", cwd=str(missing))]
+            )
+
+            result = audit_portfolio(dataset)
+
+            self.assertEqual("partial", result.status)
+            self.assertEqual(2, result.summary["projects_seen"])
+            self.assertEqual(1, result.summary["projects_evaluated"])
+            self.assertEqual(1, result.summary["projects_unavailable"])
+            self.assertEqual(0, result.summary["projects_skipped_by_limit"])
+            self.assertNotIn(str(missing), " ".join(result.notes))
+
+    def test_portfolio_reports_existing_projects_skipped_by_limit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            first = Path(temp) / "first"
+            second = Path(temp) / "second"
+            first.mkdir()
+            second.mkdir()
+            dataset = SessionDataset(
+                sessions=[SessionStats("first", cwd=str(first)), SessionStats("second", cwd=str(second))]
+            )
+
+            result = audit_portfolio(dataset, max_filesystem_projects=1)
+
+            self.assertEqual("partial", result.status)
+            self.assertEqual(1, result.summary["projects_evaluated"])
+            self.assertEqual(0, result.summary["projects_unavailable"])
+            self.assertEqual(1, result.summary["projects_skipped_by_limit"])
 
     def test_skill_checks_frontmatter_and_missing_resource(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -376,6 +567,18 @@ description: 处理示例数据
         priority_section = markdown.split("## 优先处理", 1)[1].split("## 全部发现", 1)[0]
         self.assertEqual(1, priority_section.count("同一问题"))
         self.assertIn("另一问题", priority_section)
+        required = {
+            "finding_id",
+            "engine",
+            "evidence_grade",
+            "coverage",
+            "practice_refs",
+            "recommendation_basis",
+            "placement",
+            "approval_required",
+            "verification",
+        }
+        self.assertTrue(required.issubset(payload["findings"][0]))
 
     def test_code_project_without_git_is_actionable(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -384,6 +587,26 @@ description: 处理示例数据
             (project / "pyproject.toml").write_text("[project]\nname='sample'\n", encoding="utf-8")
             result = audit_project(project, SessionDataset())
             self.assertIn("PRJ001", {item.rule_id for item in result.findings})
+
+    def test_project_inventory_covers_user_project_and_nested_agents(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            codex_home = base / "codex"
+            project = base / "project"
+            nested = project / "packages" / "api"
+            codex_home.mkdir()
+            nested.mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            (codex_home / "AGENTS.md").write_text("全局规则", encoding="utf-8")
+            (project / "AGENTS.md").write_text("运行 pytest\n完成前验证测试", encoding="utf-8")
+            (nested / "AGENTS.md").write_text("仅适用于 API", encoding="utf-8")
+            (project / "TODO.md").write_text("TODO: add release test", encoding="utf-8")
+
+            result = audit_project(project, SessionDataset(), codex_home)
+            scopes = {item["scope"] for item in result.summary["agents_inventory"]}
+            self.assertEqual({"user", "project", "nested"}, scopes)
+            self.assertIn("TODO.md", result.summary["recovery_facts"]["plan_files"])
+            self.assertEqual("in_progress", result.summary["recovery_facts"]["evidence_state"])
 
     def test_cli_writes_redacted_markdown_and_json(self):
         with tempfile.TemporaryDirectory() as temp:

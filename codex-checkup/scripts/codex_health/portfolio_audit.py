@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .common import safe_project_label
 from .model import Finding, ModuleResult
-from .project_audit import _looks_like_code_project, _run_git
+from .project_audit import _looks_like_code_project, _run_git, canonical_project_path, project_recovery_facts
 from .session_audit import SessionDataset, SessionStats
 
 
@@ -19,6 +20,7 @@ class ProjectSignals:
     tool_results: int = 0
     failed_tool_results: int = 0
     long_sessions: int = 0
+    last_activity_at: str = ""
 
     @property
     def correction_rate(self) -> float:
@@ -30,16 +32,21 @@ class ProjectSignals:
 
 
 def _project_key(cwd: str) -> tuple[str, Path]:
-    path = Path(cwd).expanduser().resolve(strict=False)
+    path = canonical_project_path(Path(cwd))
     return str(path).casefold(), path
 
 
 def _group_projects(sessions: list[SessionStats]) -> list[ProjectSignals]:
     grouped: dict[str, ProjectSignals] = {}
+    path_cache: dict[str, tuple[str, Path]] = {}
     for session in sessions:
         if not session.cwd:
             continue
-        key, path = _project_key(session.cwd)
+        project_key = path_cache.get(session.cwd)
+        if project_key is None:
+            project_key = _project_key(session.cwd)
+            path_cache[session.cwd] = project_key
+        key, path = project_key
         signals = grouped.setdefault(key, ProjectSignals(path=path, label=safe_project_label(str(path))))
         signals.sessions += 1
         signals.user_messages += session.user_messages
@@ -48,10 +55,16 @@ def _group_projects(sessions: list[SessionStats]) -> list[ProjectSignals]:
         signals.failed_tool_results += session.failed_tool_results
         if session.user_messages >= 40:
             signals.long_sessions += 1
+        if session.last_activity_at and session.last_activity_at > signals.last_activity_at:
+            signals.last_activity_at = session.last_activity_at
     return sorted(grouped.values(), key=lambda item: (-item.sessions, item.label))
 
 
-def _summary_row(signals: ProjectSignals, risk_families: list[str]) -> dict[str, object]:
+def _summary_row(
+    signals: ProjectSignals,
+    risk_families: list[str],
+    recovery_facts: dict[str, object],
+) -> dict[str, object]:
     return {
         "project": signals.label,
         "sessions": signals.sessions,
@@ -60,7 +73,9 @@ def _summary_row(signals: ProjectSignals, risk_families: list[str]) -> dict[str,
         "tool_results": signals.tool_results,
         "tool_failure_signal_rate": round(signals.tool_failure_rate, 4),
         "long_sessions": signals.long_sessions,
+        "last_activity_at": signals.last_activity_at,
         "risk_families": risk_families,
+        "recovery_facts": recovery_facts,
     }
 
 
@@ -74,10 +89,13 @@ def audit_portfolio(dataset: SessionDataset, max_filesystem_projects: int = 50) 
         return result
 
     evaluated = 0
+    unavailable = 0
+    skipped_by_limit = 0
     flagged = 0
     rows: list[dict[str, object]] = []
     for signals in projects:
         risk_families: list[str] = []
+        recovery_facts: dict[str, object] = {}
 
         if signals.user_messages >= 20 and signals.corrections >= 3 and signals.correction_rate >= 0.12:
             risk_families.append("alignment")
@@ -111,9 +129,23 @@ def audit_portfolio(dataset: SessionDataset, max_filesystem_projects: int = 50) 
                 )
             )
 
-        check_filesystem = evaluated < max_filesystem_projects and signals.path.is_dir()
+        path_available = signals.path.is_dir()
+        if not path_available:
+            unavailable += 1
+        elif evaluated >= max_filesystem_projects:
+            skipped_by_limit += 1
+        check_filesystem = path_available and evaluated < max_filesystem_projects
         if check_filesystem:
             evaluated += 1
+            recovery_facts = project_recovery_facts(signals.path)
+            recovery_facts["stale_after_days"] = 21
+            if recovery_facts.get("evidence_state") == "in_progress" and signals.last_activity_at:
+                try:
+                    last_activity = datetime.fromisoformat(signals.last_activity_at)
+                    if (datetime.now(timezone.utc) - last_activity).days >= 21:
+                        recovery_facts["evidence_state"] = "stale"
+                except ValueError:
+                    pass
             agents_present = (signals.path / "AGENTS.md").is_file()
             if signals.sessions >= 5 and (signals.corrections >= 3 or signals.long_sessions >= 2) and not agents_present:
                 risk_families.append("knowledge-persistence")
@@ -172,18 +204,23 @@ def audit_portfolio(dataset: SessionDataset, max_filesystem_projects: int = 50) 
                 )
             )
 
-        rows.append(_summary_row(signals, risk_families))
+        rows.append(_summary_row(signals, risk_families, recovery_facts))
 
     result.summary = {
         "projects_seen": len(projects),
         "projects_evaluated": evaluated,
+        "projects_unavailable": unavailable,
+        "projects_skipped_by_limit": skipped_by_limit,
         "projects_needing_direction_review": flagged,
         "filesystem_project_limit": max_filesystem_projects,
         "projects": rows[:25],
     }
-    if len(projects) > max_filesystem_projects:
+    if unavailable or skipped_by_limit:
         result.status = "partial"
+    if unavailable:
+        result.notes.append(f"有 {unavailable} 个会话关联项目目录不存在或当前不可访问，未执行文件系统检查。")
+    if skipped_by_limit:
         result.notes.append(
-            f"聊天统计覆盖 {len(projects)} 个项目；为控制本地遍历成本，只对最活跃的 {max_filesystem_projects} 个现存目录执行文件系统检查。"
+            f"为控制本地遍历成本，有 {skipped_by_limit} 个现存项目目录未执行文件系统检查；本次上限为 {max_filesystem_projects} 个。"
         )
     return result

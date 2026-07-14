@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +25,14 @@ FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+SKILL_FILE_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9_-]{1,63})[\\/]+SKILL\.md\b", re.I)
 
 
 @dataclass
 class SessionStats:
     session_id: str
     cwd: str = ""
+    last_activity_at: str = ""
     user_messages: int = 0
     assistant_messages: int = 0
     correction_signals: int = 0
@@ -38,13 +42,17 @@ class SessionStats:
     tool_results: int = 0
     failed_tool_results: int = 0
     known_events: int = 0
+    confirmed_skill_refs: set[str] = field(default_factory=set)
 
 
 @dataclass
 class SessionDataset:
     sessions: list[SessionStats] = field(default_factory=list)
+    files_available: int = 0
     files_considered: int = 0
     files_parsed: int = 0
+    files_unparsed: int = 0
+    truncated: bool = False
 
 
 def _content_text(content: Any) -> str:
@@ -80,7 +88,11 @@ def _payload_output(payload: dict[str, Any]) -> str:
 
 def _extract_session(path: Path) -> SessionStats | None:
     match = UUID_RE.search(path.name)
-    stats = SessionStats(session_id=match.group(0) if match else f"file-{path.stat().st_size}")
+    file_stat = path.stat()
+    stats = SessionStats(
+        session_id=match.group(0) if match else f"file-{file_stat.st_size}",
+        last_activity_at=datetime.fromtimestamp(file_stat.st_mtime, timezone.utc).isoformat(),
+    )
     event_user_messages: list[str] = []
     fallback_user_messages: list[str] = []
     saw_object = False
@@ -131,6 +143,8 @@ def _extract_session(path: Path) -> SessionStats | None:
         elif item_type in {"function_call", "custom_tool_call", "local_shell_call", "computer_tool_call"}:
             stats.known_events += 1
             stats.tool_calls += 1
+            serialized = json.dumps(payload, ensure_ascii=False, default=str)
+            stats.confirmed_skill_refs.update(match.group(1).lower() for match in SKILL_FILE_RE.finditer(serialized))
         elif item_type in {"function_call_output", "custom_tool_call_output", "local_shell_call_output", "computer_tool_call_output"}:
             stats.known_events += 1
             stats.tool_results += 1
@@ -153,7 +167,7 @@ def _extract_session(path: Path) -> SessionStats | None:
     return stats
 
 
-def _session_files(codex_home: Path, days: int, max_sessions: int) -> list[Path]:
+def _session_file_selection(codex_home: Path, days: int, max_sessions: int) -> tuple[list[Path], int]:
     cutoff = time.time() - days * 86400
     candidates: list[Path] = []
     roots = [codex_home / "sessions", codex_home / "archived_sessions"]
@@ -167,7 +181,12 @@ def _session_files(codex_home: Path, days: int, max_sessions: int) -> list[Path]
             except OSError:
                 continue
     candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
-    return candidates[:max_sessions]
+    return candidates[:max_sessions], len(candidates)
+
+
+def _session_files(codex_home: Path, days: int, max_sessions: int) -> list[Path]:
+    files, _ = _session_file_selection(codex_home, days, max_sessions)
+    return files
 
 
 def _project_summaries(sessions: list[SessionStats]) -> list[dict[str, Any]]:
@@ -193,8 +212,10 @@ def _project_summaries(sessions: list[SessionStats]) -> list[dict[str, Any]]:
 def audit_sessions(codex_home: Path, days: int, max_sessions: int) -> tuple[ModuleResult, SessionDataset]:
     result = ModuleResult(name="sessions")
     dataset = SessionDataset()
-    files = _session_files(codex_home, days, max_sessions)
+    files, files_available = _session_file_selection(codex_home, days, max_sessions)
+    dataset.files_available = files_available
     dataset.files_considered = len(files)
+    dataset.truncated = files_available > len(files)
     if not files:
         result.status = "unavailable"
         result.summary = {"days": days, "session_files": 0}
@@ -209,14 +230,19 @@ def audit_sessions(codex_home: Path, days: int, max_sessions: int) -> tuple[Modu
         if stats is not None:
             dataset.files_parsed += 1
             dataset.sessions.append(stats)
+        else:
+            dataset.files_unparsed += 1
 
     known_sessions = [item for item in dataset.sessions if item.known_events > 0]
     if not known_sessions:
         result.status = "partial"
         result.notes.append("会话文件可读取，但未识别到支持的事件结构；本地格式可能已变化。")
-    elif len(known_sessions) < len(dataset.sessions):
+    elif dataset.files_unparsed or len(known_sessions) < len(dataset.sessions):
         result.status = "partial"
         result.notes.append("部分会话未识别到支持的事件结构。")
+    if dataset.truncated:
+        result.status = "partial"
+        result.notes.append(f"时间范围内有 {files_available} 个会话文件，仅按上限读取最近 {len(files)} 个。")
 
     total_user = sum(item.user_messages for item in known_sessions)
     corrections = sum(item.correction_signals for item in known_sessions)
@@ -232,6 +258,11 @@ def audit_sessions(codex_home: Path, days: int, max_sessions: int) -> tuple[Modu
     result.summary = {
         "days": days,
         "session_files": len(files),
+        "session_files_available": files_available,
+        "session_files_considered": len(files),
+        "session_files_parsed": dataset.files_parsed,
+        "session_files_unparsed": dataset.files_unparsed,
+        "session_files_truncated": dataset.truncated,
         "sessions_parsed": len(known_sessions),
         "user_messages": total_user,
         "correction_signals": corrections,
@@ -242,6 +273,9 @@ def audit_sessions(codex_home: Path, days: int, max_sessions: int) -> tuple[Modu
         "tool_results": tool_results,
         "failed_tool_results": failed_results,
         "tool_failure_signal_rate": round(failure_rate, 4),
+        "confirmed_skill_refs": sorted(
+            {name for session in known_sessions for name in session.confirmed_skill_refs}
+        ),
         "projects": _project_summaries(known_sessions),
     }
 

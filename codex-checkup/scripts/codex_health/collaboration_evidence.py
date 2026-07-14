@@ -9,7 +9,16 @@ from pathlib import Path
 from typing import Any
 
 from .common import safe_project_label, short_hash
-from .session_audit import CONTINUE_RE, CORRECTION_RE, UUID_RE, _content_text, _session_files
+from .session_audit import (
+    CONTINUE_RE,
+    CORRECTION_RE,
+    FAILURE_RE,
+    SKILL_FILE_RE,
+    UUID_RE,
+    _content_text,
+    _payload_output,
+    _session_file_selection,
+)
 
 
 SCOPE_RE = re.compile(
@@ -37,10 +46,6 @@ COMPLETION_RE = re.compile(
     r"(?:已完成|完成并|已经.{0,12}完成|已提交|已经提交|已生成|已经生成|已写入|已交付|处理完成|修复完成|工作区干净|\bcompleted\b|\bdone\b|\bdelivered\b)",
     re.IGNORECASE,
 )
-VERIFIED_RE = re.compile(
-    r"(?:测试|验证|确认|构建|lint|test|工作区干净|启动成功|截图|预览|通过|已提交|git|build|verified|passed)",
-    re.IGNORECASE,
-)
 INCOMPLETE_RE = re.compile(
     r"(?:尚未|还未|未完成|未(?:安装|上传|导出|提交|发布|执行|交付)|没有真正.{0,8}(?:提交|完成|导出)|仍需|还需要你|需要你提供|等待你|not yet|still need|pending user)",
     re.IGNORECASE,
@@ -51,6 +56,10 @@ SUCCESS_DISQUALIFIER_RE = re.compile(
 )
 
 SECRET_PATTERNS = (
+    re.compile(r"-----BEGIN [A-Z0-9 ]{3,80}-----.*?-----END [A-Z0-9 ]{3,80}-----", re.I),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{12,}=*\b", re.I),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^\s:@/]+:[^\s@/]+@[^\s]+", re.I),
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{16,}\b"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
@@ -58,6 +67,19 @@ SECRET_PATTERNS = (
         r"(?i)\b(api[_-]?key|token|secret|password|passwd|authorization)\b(\s*[:=]\s*)([\"']?)[^\s,;\"']{8,}([\"']?)"
     ),
 )
+VERIFY_CALL_RE = re.compile(
+    r"(?:\bpytest\b|\bunittest\b|\bnpm\s+(?:run\s+)?test\b|\bpnpm\s+(?:run\s+)?test\b|"
+    r"\byarn\s+(?:run\s+)?test\b|\bcargo\s+test\b|\bgo\s+test\b|\bdotnet\s+test\b|"
+    r"\bmvn\s+test\b|\bgradle\w*\s+test\b|\bcompileall\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b|"
+    r"\b(?:npm|pnpm|yarn)\s+(?:run\s+)?lint\b|\bgit\s+diff\s+--check\b)",
+    re.I,
+)
+SUCCESSFUL_TOOL_RE = re.compile(
+    r"(?:exit code:\s*0|process exited with code 0|\btests? passed\b|\b[1-9]\d* passed\b|\bbuild succeeded\b|"
+    r"\bcompileall:\s*ok\b|\bgit diff --check:\s*ok\b|\bok\s*$)",
+    re.I,
+)
+UNSUCCESSFUL_TOOL_RE = re.compile(r"(?:\bfailed\b|\b[1-9]\d* errors?\b|\btraceback\b)", re.I)
 
 INCIDENT_PRIORITY = {
     "scope_control": 6,
@@ -93,18 +115,22 @@ def _skip_message(text: str) -> bool:
     )
 
 
-def _read_messages(path: Path) -> tuple[str, str, list[Message]]:
+def _read_messages(path: Path) -> tuple[str, str, list[Message], bool, set[str]]:
     match = UUID_RE.search(path.name)
     session_id = match.group(0) if match else path.name
     cwd = ""
     messages: list[Message] = []
     fallback_user: list[tuple[int, Message]] = []
     saw_event_user = False
+    verification_call_ids: set[str] = set()
+    unkeyed_verification_calls = 0
+    verified_tool_evidence = False
+    confirmed_skill_refs: set[str] = set()
 
     try:
         handle = path.open("r", encoding="utf-8", errors="replace")
     except OSError:
-        return session_id, cwd, messages
+        return session_id, cwd, messages, verified_tool_evidence, confirmed_skill_refs
     with handle:
         for line in handle:
             try:
@@ -127,7 +153,40 @@ def _read_messages(path: Path) -> tuple[str, str, list[Message]]:
                     saw_event_user = True
                     messages.append(Message("user", text.strip()))
                 continue
-            if record_type != "response_item" or payload.get("type") != "message":
+            if record_type != "response_item":
+                continue
+            item_type = payload.get("type")
+            if item_type in {"function_call", "custom_tool_call", "local_shell_call", "computer_tool_call"}:
+                serialized = json.dumps(payload, ensure_ascii=False, default=str)
+                confirmed_skill_refs.update(match.group(1).lower() for match in SKILL_FILE_RE.finditer(serialized))
+                if VERIFY_CALL_RE.search(serialized):
+                    call_id = payload.get("call_id") or payload.get("id")
+                    if isinstance(call_id, str) and call_id:
+                        verification_call_ids.add(call_id)
+                    else:
+                        unkeyed_verification_calls += 1
+                continue
+            if item_type in {
+                "function_call_output",
+                "custom_tool_call_output",
+                "local_shell_call_output",
+                "computer_tool_call_output",
+            }:
+                call_id = payload.get("call_id") or payload.get("id")
+                related = (
+                    isinstance(call_id, str) and call_id in verification_call_ids
+                ) or unkeyed_verification_calls > 0
+                output = _payload_output(payload)
+                if (
+                    related
+                    and output
+                    and not FAILURE_RE.search(output)
+                    and not UNSUCCESSFUL_TOOL_RE.search(output)
+                    and SUCCESSFUL_TOOL_RE.search(output)
+                ):
+                    verified_tool_evidence = True
+                continue
+            if item_type != "message":
                 continue
             role = payload.get("role")
             text = _content_text(payload.get("content")).strip()
@@ -141,7 +200,7 @@ def _read_messages(path: Path) -> tuple[str, str, list[Message]]:
     if not saw_event_user and fallback_user:
         for index, message in reversed(fallback_user):
             messages.insert(index, message)
-    return session_id, cwd, messages
+    return session_id, cwd, messages, verified_tool_evidence, confirmed_skill_refs
 
 
 def _classify_user_message(text: str) -> str | None:
@@ -196,7 +255,7 @@ def _redact(text: str, codex_home: Path, cwd: str, max_chars: int = 650) -> str:
 
 
 def _session_candidates(path: Path, codex_home: Path) -> list[CandidateIncident]:
-    session_id, cwd, messages = _read_messages(path)
+    session_id, cwd, messages, _, _ = _read_messages(path)
     if not messages:
         return []
     session_ref = short_hash(session_id)
@@ -232,7 +291,7 @@ def _session_candidates(path: Path, codex_home: Path) -> list[CandidateIncident]
 
 
 def _successful_session_candidate(path: Path, codex_home: Path) -> CandidateIncident | None:
-    session_id, cwd, messages = _read_messages(path)
+    session_id, cwd, messages, verified_tool_evidence, _ = _read_messages(path)
     if not messages:
         return None
     continuation_indices = _continuation_indices(messages)
@@ -258,6 +317,8 @@ def _successful_session_candidate(path: Path, codex_home: Path) -> CandidateInci
     completion_text = " ".join(messages[index].text for index in tail_assistant_indices[-2:])
     if not COMPLETION_RE.search(completion_text) or INCOMPLETE_RE.search(completion_text):
         return None
+    if not verified_tool_evidence:
+        return None
 
     selected_indices = {user_indices[0], final_assistant_index}
     if len(user_indices) > 1:
@@ -270,7 +331,7 @@ def _successful_session_candidate(path: Path, codex_home: Path) -> CandidateInci
         for index in ordered
     )
     signal_offset = ordered.index(final_assistant_index)
-    basis = "completion_and_verification" if VERIFIED_RE.search(completion_text) else "completion_without_followup_correction"
+    basis = "completion_and_verified_tool"
     return CandidateIncident(
         "successful_completion",
         short_hash(session_id),
@@ -320,10 +381,16 @@ def build_collaboration_evidence(
     max_sessions: int = 300,
     max_samples: int = 12,
 ) -> dict[str, Any]:
-    files = _session_files(codex_home, days, max_sessions)
+    files, files_available = _session_file_selection(codex_home, days, max_sessions)
     friction_candidates: list[CandidateIncident] = []
     success_candidates: list[CandidateIncident] = []
+    confirmed_skill_refs: set[str] = set()
+    sessions_with_messages = 0
     for path in files:
+        _, _, messages, _, skill_refs = _read_messages(path)
+        if messages:
+            sessions_with_messages += 1
+        confirmed_skill_refs.update(skill_refs)
         session_candidates = _session_candidates(path, codex_home)
         friction_candidates.extend(item for item in session_candidates if item.kind != "success_pattern")
         success_candidates.extend(item for item in session_candidates if item.kind == "success_pattern")
@@ -332,7 +399,7 @@ def build_collaboration_evidence(
             success_candidates.append(successful_session)
 
     friction_candidates.sort(key=lambda item: -INCIDENT_PRIORITY[item.kind])
-    success_candidates.sort(key=lambda item: item.basis != "completion_and_verification")
+    success_candidates.sort(key=lambda item: item.basis != "completion_and_verified_tool")
     success_quota = min(len(success_candidates), max(1, max_samples // 3))
     friction_quota = max_samples - success_quota
     selected_friction = _select_with_kind_limit(friction_candidates, friction_quota)
@@ -355,9 +422,13 @@ def build_collaboration_evidence(
         "notice": "Contains short redacted chat excerpts. Reading this file places those excerpts in the current Codex context.",
         "scope": {
             "days": days,
+            "session_files_available": files_available,
             "session_files_considered": len(files),
+            "session_files_truncated": files_available > len(files),
+            "sessions_with_messages": sessions_with_messages,
             "max_sessions": max_sessions,
             "max_samples": max_samples,
+            "confirmed_skill_refs": sorted(confirmed_skill_refs),
         },
         "sample_count": len(selected),
         "sample_class_counts": dict(sorted(class_counts.items())),

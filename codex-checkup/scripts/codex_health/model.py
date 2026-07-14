@@ -39,10 +39,3 @@ class ModuleResult:
             "findings": [item.to_dict() for item in self.findings],
             "notes": self.notes,
         }
-
-
-def sort_findings(findings: list[Finding]) -> list[Finding]:
-    return sorted(
-        findings,
-        key=lambda item: (PRIORITY_ORDER[item.priority], item.domain, item.rule_id),
-    )

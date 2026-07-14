@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -20,6 +21,29 @@ PROJECT_MARKERS = {
     ".sln",
 }
 SOURCE_SUFFIXES = {".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".cs", ".cpp", ".c", ".h"}
+SKIP_DIRS = {
+    ".git",
+    ".codex-health-private",
+    ".pytest_cache",
+    "node_modules",
+    ".venv",
+    "venv",
+    "dist",
+    "build",
+    "__pycache__",
+}
+PLAN_NAMES = {"TODO.MD", "PLAN.MD", "TASKS.MD", "ROADMAP.MD", "BACKLOG.MD"}
+TEXT_SUFFIXES = {".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".cs"}
+TODO_RE = re.compile(r"(?:\bTODO\b|\bFIXME\b|\bXXX\b|待办|未完成|下一步)", re.I)
+COMMAND_RE = re.compile(
+    r"(?:```(?:bash|sh|powershell|shell|cmd)|\b(?:python|pytest|npm|pnpm|yarn|cargo|go|dotnet|mvn|gradle)\b)",
+    re.I,
+)
+VALIDATION_RE = re.compile(r"(?:测试|验证|验收|完成条件|test|verify|validation|build|lint)", re.I)
+
+
+def _keep_directory(name: str) -> bool:
+    return name not in SKIP_DIRS and not name.startswith("codex-health-report-")
 
 
 def _run_git(project: Path, *args: str) -> tuple[int, str]:
@@ -48,7 +72,7 @@ def _looks_like_code_project(project: Path) -> bool:
     source_count = 0
     files_seen = 0
     for current, dirnames, filenames in os.walk(project):
-        dirnames[:] = [name for name in dirnames if name not in {".git", "node_modules", ".venv", "venv", "dist", "build"}]
+        dirnames[:] = [name for name in dirnames if _keep_directory(name)]
         for filename in filenames:
             files_seen += 1
             if Path(filename).suffix.lower() in SOURCE_SUFFIXES:
@@ -60,18 +84,125 @@ def _looks_like_code_project(project: Path) -> bool:
     return False
 
 
+def canonical_project_path(path: Path) -> Path:
+    resolved = path.expanduser().resolve(strict=False)
+    if not resolved.is_dir():
+        return resolved
+    code, root = _run_git(resolved, "rev-parse", "--show-toplevel")
+    if code == 0 and root:
+        return Path(root).resolve(strict=False)
+    return resolved
+
+
+def project_recovery_facts(project: Path, max_files: int = 250) -> dict[str, object]:
+    facts: dict[str, object] = {
+        "git_branch": "unknown",
+        "git_changed_entries": 0,
+        "git_untracked_entries": 0,
+        "plan_files": [],
+        "todo_markers": 0,
+        "files_considered": 0,
+        "files_scanned": 0,
+        "scan_truncated": False,
+        "evidence_state": "unknown",
+    }
+    git_code, _ = _run_git(project, "rev-parse", "--show-toplevel")
+    if git_code == 0:
+        _, branch = _run_git(project, "branch", "--show-current")
+        status_code, status_text = _run_git(project, "status", "--porcelain=v1", "--untracked-files=all")
+        status_lines = status_text.splitlines() if status_code == 0 and status_text else []
+        facts["git_branch"] = branch or "detached"
+        facts["git_untracked_entries"] = sum(1 for line in status_lines if line.startswith("??"))
+        facts["git_changed_entries"] = len(status_lines) - int(facts["git_untracked_entries"])
+        if status_lines:
+            facts["evidence_state"] = "in_progress"
+
+    plan_files: list[str] = []
+    todo_markers = 0
+    files_considered = 0
+    files_scanned = 0
+    for current, dirnames, filenames in os.walk(project):
+        relative_dir = Path(current).resolve(strict=False).relative_to(project.resolve(strict=False))
+        dirnames[:] = [name for name in dirnames if _keep_directory(name)]
+        if len(relative_dir.parts) >= 3:
+            dirnames[:] = []
+        for filename in filenames:
+            if files_considered >= max_files:
+                facts["scan_truncated"] = True
+                break
+            files_considered += 1
+            path = Path(current) / filename
+            if filename.upper() in PLAN_NAMES:
+                plan_files.append(path.relative_to(project).as_posix())
+            if path.suffix.lower() not in TEXT_SUFFIXES:
+                continue
+            try:
+                if path.stat().st_size > 256_000:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            files_scanned += 1
+            todo_markers += len(TODO_RE.findall(text))
+        if facts["scan_truncated"]:
+            break
+    facts["plan_files"] = sorted(plan_files)[:20]
+    facts["todo_markers"] = todo_markers
+    facts["files_considered"] = files_considered
+    facts["files_scanned"] = files_scanned
+    return facts
+
+
+def agents_inventory(project: Path, codex_home: Path | None, max_files: int = 50) -> tuple[list[dict[str, object]], bool]:
+    paths: list[tuple[str, Path, str]] = []
+    truncated = False
+    if codex_home is not None:
+        user_agents = codex_home / "AGENTS.md"
+        if user_agents.is_file():
+            paths.append(("user", user_agents, "$CODEX_HOME/AGENTS.md"))
+    for current, dirnames, filenames in os.walk(project):
+        dirnames[:] = [name for name in dirnames if _keep_directory(name)]
+        if "AGENTS.md" not in filenames:
+            continue
+        path = Path(current) / "AGENTS.md"
+        relative = path.relative_to(project).as_posix()
+        scope = "project" if relative == "AGENTS.md" else "nested"
+        paths.append((scope, path, relative))
+        if len(paths) >= max_files:
+            truncated = True
+            break
+
+    records: list[dict[str, object]] = []
+    for scope, path, label in paths[:max_files]:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            records.append(
+                {
+                    "scope": scope,
+                    "path": label,
+                    "readable": True,
+                    "nonblank_lines": sum(1 for line in text.splitlines() if line.strip()),
+                    "has_commands": bool(COMMAND_RE.search(text)),
+                    "has_validation": bool(VALIDATION_RE.search(text)),
+                }
+            )
+        except OSError:
+            records.append({"scope": scope, "path": label, "readable": False})
+    return records, truncated
+
+
 def _same_project(session: SessionStats, project: Path) -> bool:
     if not session.cwd:
         return False
     try:
-        session_path = Path(session.cwd).resolve(strict=False)
-        project_path = project.resolve(strict=False)
+        session_path = canonical_project_path(Path(session.cwd))
+        project_path = canonical_project_path(project)
         return session_path == project_path
     except OSError:
         return False
 
 
-def audit_project(project: Path, sessions: SessionDataset) -> ModuleResult:
+def audit_project(project: Path, sessions: SessionDataset, codex_home: Path | None = None) -> ModuleResult:
     result = ModuleResult(name="project")
     if not project.is_dir():
         result.status = "unavailable"
@@ -100,7 +231,7 @@ def audit_project(project: Path, sessions: SessionDataset) -> ModuleResult:
         )
 
     if has_git:
-        status_code, status_text = _run_git(project, "status", "--porcelain=v1")
+        status_code, status_text = _run_git(project, "status", "--porcelain=v1", "--untracked-files=all")
         status_lines = status_text.splitlines() if status_code == 0 and status_text else []
         untracked = sum(1 for line in status_lines if line.startswith("??"))
         changed = len(status_lines) - untracked
@@ -151,6 +282,14 @@ def audit_project(project: Path, sessions: SessionDataset) -> ModuleResult:
         }
     )
 
+    result.summary["recovery_facts"] = project_recovery_facts(project)
+    inventory, inventory_truncated = agents_inventory(project, codex_home)
+    result.summary["agents_inventory"] = inventory
+    result.summary["agents_inventory_truncated"] = inventory_truncated
+    if inventory_truncated:
+        result.status = "partial"
+        result.notes.append("AGENTS.md 文件超过清单上限，未完整读取全部嵌套指令。")
+
     agents_path = project / "AGENTS.md"
     if not agents_path.is_file() and len(project_sessions) >= 5 and corrections >= 2:
         result.findings.append(
@@ -184,6 +323,25 @@ def audit_project(project: Path, sessions: SessionDataset) -> ModuleResult:
                     f"AGENTS.md 有 {nonblank_lines} 行非空内容。",
                     "每次任务都要加载大量规则，关键约束更难被识别。",
                     "删除重复与失效规则；把目录专属要求移动到更近的嵌套 AGENTS.md。",
+                    True,
+                )
+            )
+        missing_quality = []
+        if not COMMAND_RE.search(agents_text):
+            missing_quality.append("可执行命令")
+        if not VALIDATION_RE.search(agents_text):
+            missing_quality.append("验证或完成标准")
+        if missing_quality:
+            result.findings.append(
+                Finding(
+                    "PRJ007",
+                    "项目执行",
+                    "P2",
+                    "中",
+                    "项目级 AGENTS.md 缺少执行信息",
+                    f"根目录 AGENTS.md 未识别到：{'、'.join(missing_quality)}。",
+                    "Codex 仍需要在每次任务中猜测怎样构建、测试或判断完成。",
+                    "补充当前项目真实可运行的命令和最小完成条件；不要写无法执行的泛化要求。",
                     True,
                 )
             )

@@ -2,10 +2,10 @@
 
 > **让 Codex 审计 Codex：帮助你升级与 Codex 的协作方式，找出互相打架的规则和做到一半被遗忘的项目，并告诉你接下来最应该先做什么。**
 
-![Version](https://img.shields.io/badge/version-0.7.0-111111)
+![Version](https://img.shields.io/badge/version-0.8.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![Local First](https://img.shields.io/badge/local--first-read--only-2E7D32)
-![Tests](https://img.shields.io/badge/tests-14%20passing-2E7D32)
+![Tests](https://img.shields.io/badge/tests-23%20passing-2E7D32)
 
 `codex-checkup` 是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。
 
@@ -250,17 +250,17 @@ python .\codex-checkup\scripts\prepare_collaboration_evidence.py `
 
 ## 当前实现进度
 
-`0.7.0` 以 Codex Checkup / Codex 全景体检为正式名称，并已固定三个引擎、证据等级、项目状态机、统一输出契约和 Codex 实践知识网络，但三个引擎的自动化程度不同。
+`0.8.0` 修复了会话覆盖失真、助手自报成功、项目重复识别和私有证据脱敏缺口，并把 Skill 调用证据、AGENTS.md 指令链、项目恢复事实和统一证据字段接入基础报告。三个引擎的自动化程度仍不同。
 
 | 能力 | 当前状态 | 已实现 | 仍在建设 |
 | --- | --- | --- | --- |
-| 交互协作 | 可用 | 会话统计、顺利/摩擦样本、脱敏证据、语义诊断框架 | Skill 调用关联和漏触发判断 |
-| Codex 工作台 | 基础可用 | 配置、Skill 结构、MCP 风险、项目根 `AGENTS.md` 基础检查 | 用户/嵌套 `AGENTS.md` 关系图、语义冲突 |
-| 项目恢复 | 风险雷达可用 | 跨项目活跃度、返工、工具失败、Git 和知识沉淀信号 | 完整状态恢复、承诺与产物对照、依赖排序 |
-| 统一报告 | 契约已固定 | 基础 Markdown/JSON 报告、统一字段和排序规则 | 四份结果的完整自动汇总 |
+| 交互协作 | 可用 | 真实覆盖状态、顺利/摩擦样本、验证工具证据、确认使用的 Skill、增强脱敏 | 语义级漏触发和工作流完整性判断 |
+| Codex 工作台 | 基础可用 | 配置、Skill/MCP 风险、用户/项目/嵌套 `AGENTS.md` 清单与质量信号 | AGENTS.md 语义冲突和实际遵守关系图 |
+| 项目恢复 | 风险雷达可用 | Git 根归一化、最近活动、分支/工作区、计划文件、TODO 和保守状态 | 聊天承诺与产物对照、测试结果和完整依赖排序 |
+| 统一报告 | 基础可用 | Markdown/JSON、证据等级、覆盖、实践节点、放置位置和复测方式 | 四份语义结果的一键自动汇总 |
 | 实践知识网络 | 可用 | 20 个实践节点、官方/X 来源分层、症状路由和反例 | 定期刷新与更多真实用户复测 |
 
-当前版本通过 14 项回归测试、Skill 格式校验和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
+当前版本通过 23 项回归测试、Skill 格式校验、对抗夹具和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
 
 ## 项目结构
 
