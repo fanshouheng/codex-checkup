@@ -13,6 +13,7 @@ SKILL_ROOT = ROOT / "codex-health-check"
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 
 from codex_health.config_audit import audit_config
+from codex_health.collaboration_evidence import build_collaboration_evidence
 from codex_health.model import Finding, ModuleResult
 from codex_health.portfolio_audit import audit_portfolio
 from codex_health.project_audit import audit_project
@@ -114,6 +115,69 @@ API_TOKEN = "actual-sensitive-value"
             rendered = json.dumps(payload, ensure_ascii=False) + render_markdown(payload)
             self.assertNotIn("我说的是另一个模块", rendered)
             self.assertEqual(1, len(dataset.sessions))
+
+    def test_collaboration_evidence_keeps_context_and_redacts_private_values(self):
+        with tempfile.TemporaryDirectory() as temp:
+            codex_home = Path(temp) / "codex-home"
+            project = Path(temp) / "private-project"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "14"
+            session_dir.mkdir(parents=True)
+            project.mkdir()
+            rows = [{"type": "session_meta", "payload": {"id": "019f0000-0000-7000-8000-000000000099", "cwd": str(project)}}]
+
+            def add_user(text: str) -> None:
+                rows.append({"type": "event_msg", "payload": {"type": "user_message", "message": text}})
+
+            def add_assistant(text: str) -> None:
+                rows.append(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": text}],
+                        },
+                    }
+                )
+
+            add_assistant("你准备做什么产品？")
+            add_user("我要检查哪些项目路线不对，哪些流程不对")
+            add_assistant("请继续说明发布方式。")
+            add_user("发布时不要被看出来是这个项目改的")
+            add_user("请处理接口，token=super-secret-token-value")
+            add_assistant(f"我已经重写全部模块，文件在 {project}。")
+            add_user("我说的是只改接口，其他不要改，api_key=another-secret-value")
+            add_assistant("已经调整。")
+            add_user("你测试了吗？")
+            add_assistant("还没有运行测试。")
+            add_user("继续")
+            add_assistant("我先停在这里等确认。")
+            add_user("继续")
+            add_assistant("测试已通过。")
+            add_user("这次对了")
+            add_user("# AGENTS.md instructions\nAPI_TOKEN=must-not-appear")
+            session_path = session_dir / "rollout-019f0000-0000-7000-8000-000000000099.jsonl"
+            session_path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
+
+            payload = build_collaboration_evidence(codex_home, days=30, max_sessions=20, max_incidents=12)
+            kinds = {item["type"] for item in payload["incidents"]}
+            self.assertTrue({"scope_control", "verification_gap", "autonomy_calibration", "success_pattern"}.issubset(kinds))
+            self.assertTrue(all(sum(1 for message in item["context"] if message["is_signal"]) == 1 for item in payload["incidents"]))
+            rendered = json.dumps(payload, ensure_ascii=False)
+            self.assertTrue(payload["private"])
+            self.assertIn("$PROJECT", rendered)
+            self.assertNotIn(str(project), rendered)
+            self.assertNotIn("super-secret-token-value", rendered)
+            self.assertNotIn("another-secret-value", rendered)
+            self.assertNotIn("must-not-appear", rendered)
+            signal_texts = [
+                message["text"]
+                for item in payload["incidents"]
+                for message in item["context"]
+                if message["is_signal"]
+            ]
+            self.assertNotIn("我要检查哪些项目路线不对，哪些流程不对", signal_texts)
+            self.assertNotIn("发布时不要被看出来是这个项目改的", signal_texts)
 
     def test_portfolio_requires_multiple_evidence_families_for_route_review(self):
         with tempfile.TemporaryDirectory() as temp:

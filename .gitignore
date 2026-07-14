@@ -5,3 +5,4 @@ dist/
 build/
 *.skill
 codex-health-report-*/
+.codex-health-private/

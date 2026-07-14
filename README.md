@@ -9,6 +9,7 @@
 - 审核 `config.toml` 的权限组合、过时字段、内联敏感值、MCP 与失效项目路径
 - 审核全局和项目级 Skills 的元数据、重复项、断链资源、体积和高风险指令
 - 统计最近聊天中的返工信号、连续确认、长会话和工具失败
+- 从关键事件提取少量私有、脱敏上下文，让 Codex 诊断具体协作模式并给出目标协作方式
 - 跨项目汇总目标对齐、工具可靠性、知识沉淀和 Git 恢复点，只把多证据项目列入方向复盘
 - 结合当前项目的 Git、AGENTS.md 和聊天样本给出流程建议
 - 同时生成便于阅读的 Markdown 和便于后续自动化的 JSON 报告
@@ -45,6 +46,14 @@ python .\codex-health-check\scripts\run_audit.py --modules config,skills --outpu
 ```
 
 可用模块：`config`、`skills`、`sessions`、`portfolio`、`project`。
+
+深度协作诊断单独生成私有证据包：
+
+```powershell
+python .\codex-health-check\scripts\prepare_collaboration_evidence.py --days 30 --max-incidents 12
+```
+
+私有证据包不应提交或分享。读取它会让其中的短聊天片段进入当前 Codex 上下文。
 
 ## 报告原则
 
