@@ -37,7 +37,8 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 
 7. 明确告诉用户：私有证据包同时包含顺利完成样本和摩擦样本，均为短小、尽力脱敏的聊天片段；读取后这些片段会进入当前 Codex 上下文，但不会写入可分享报告。然后读取 [references/collaboration-rubric.md](references/collaboration-rubric.md) 和 `.codex-health-private/collaboration-evidence.json`。
 8. 分别运行交互协作、Codex 工作台和项目恢复判断。项目只从会话工作目录、最近项目记录和用户指定目录发现；状态必须符合契约，证据不足时使用 `unknown`。
-9. 按契约生成 `health-check.md`。每个结论记录证据等级、置信度、覆盖范围、主要归因、放置位置、审批边界和验证方法。先讲最值得处理的 3 项，不要用问题数量制造焦虑。
+9. 形成观察结论后读取 [references/codex-practice-network.md](references/codex-practice-network.md)，把每项建议路由到最匹配的 `PRAxxx` 节点。区分官方规范、官方 X 新能力、具名实践者经验、普通社区线索和反例；不得把传播量当作正确性证据。
+10. 按契约生成 `health-check.md`。每个结论记录证据等级、置信度、覆盖范围、主要归因、实践节点、建议依据、放置位置、审批边界和验证方法。先讲最值得处理的 3 项，不要用问题数量制造焦虑。
 
 ## 三个引擎
 
@@ -45,7 +46,7 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 - **Codex 工作台引擎**：检查配置、用户/项目/嵌套 AGENTS.md、Skills、MCP 的质量、作用域、重复、冲突和实际遵守情况。
 - **项目恢复引擎**：恢复审计范围内项目的目标、状态、未完成项、阻塞、依赖和下一步，不评价项目商业价值。
 
-产品契约见 [references/audit-contract.md](references/audit-contract.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
+产品契约见 [references/audit-contract.md](references/audit-contract.md)，Codex 使用建议见 [references/codex-practice-network.md](references/codex-practice-network.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
 
 ## 输出要求
 
@@ -56,7 +57,7 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 3. **项目恢复地图**：每个可识别项目的证据状态、已完成、未完成、阻塞和下一步。
 4. **建议行动顺序**：按用户目标、阻塞关系、收尾成本、疑似遗忘和系统性影响排序，并说明理由和完成条件。
 
-最后说明审计范围、`A/B/C/D/U` 证据分布和无法判断项。涉及写配置、删 Skill、归档聊天、关闭项目或修改项目时，先征得用户同意。
+最后说明审计范围、`A/B/C/D/U` 证据分布、建议来源等级和无法判断项。每项优化建议至少列出一个 `PRAxxx`；没有匹配实践时标记为“本地推导”。涉及写配置、删 Skill、归档聊天、关闭项目或修改项目时，先征得用户同意。
 
 ## 复测
 

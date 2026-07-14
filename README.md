@@ -2,10 +2,10 @@
 
 > **让 Codex 审计 Codex：找出你们怎样浪费时间、哪些规则互相打架、哪些项目做到一半被遗忘，并恢复下一步行动顺序。**
 
-![Version](https://img.shields.io/badge/version-0.5.0-111111)
+![Version](https://img.shields.io/badge/version-0.6.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![Local First](https://img.shields.io/badge/local--first-read--only-2E7D32)
-![Tests](https://img.shields.io/badge/tests-13%20passing-2E7D32)
+![Tests](https://img.shields.io/badge/tests-14%20passing-2E7D32)
 
 `codex-health-check` 是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。
 
@@ -155,6 +155,20 @@ flowchart LR
 - 不根据插件目录存在就认定插件已启用
 - 不根据助手自称完成就认定项目已完成
 
+### 建议来自一张可追溯的实践网络
+
+体检不会只说“建议你写清楚一点”。它把本地症状路由到具体实践节点，例如：
+
+```text
+反复说继续
+  -> PRA001 强目标契约
+  -> PRA003 结果反馈环
+  -> 放在当前 prompt 或 /goal
+  -> 用完成证据和阻塞条件复测
+```
+
+知识网络同时保存官方文档、OpenAI 官方 X 动态、具名开发者实践和社区反例。官方规范与社区技巧分层记录；高点赞不会自动升级成最佳实践。完整网络见 [codex-practice-network.md](codex-health-check/references/codex-practice-network.md)。
+
 ## 快速开始
 
 ### 安装到 Codex
@@ -234,7 +248,7 @@ python .\codex-health-check\scripts\prepare_collaboration_evidence.py `
 
 ## 当前实现进度
 
-`0.5.0` 已经固定三个引擎、证据等级、项目状态机和统一输出契约，但三个引擎的自动化程度不同。
+`0.6.0` 已经固定三个引擎、证据等级、项目状态机、统一输出契约和 Codex 实践知识网络，但三个引擎的自动化程度不同。
 
 | 能力 | 当前状态 | 已实现 | 仍在建设 |
 | --- | --- | --- | --- |
@@ -242,8 +256,9 @@ python .\codex-health-check\scripts\prepare_collaboration_evidence.py `
 | Codex 工作台 | 基础可用 | 配置、Skill 结构、MCP 风险、项目根 `AGENTS.md` 基础检查 | 用户/嵌套 `AGENTS.md` 关系图、语义冲突 |
 | 项目恢复 | 风险雷达可用 | 跨项目活跃度、返工、工具失败、Git 和知识沉淀信号 | 完整状态恢复、承诺与产物对照、依赖排序 |
 | 统一报告 | 契约已固定 | 基础 Markdown/JSON 报告、统一字段和排序规则 | 四份结果的完整自动汇总 |
+| 实践知识网络 | 可用 | 20 个实践节点、官方/X 来源分层、症状路由和反例 | 定期刷新与更多真实用户复测 |
 
-当前版本通过 13 项回归测试、Skill 格式校验和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
+当前版本通过 14 项回归测试、Skill 格式校验和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
 
 ## 项目结构
 
@@ -257,6 +272,7 @@ codex-health-check/
 │   └── codex_health/                # 配置、Skills、会话、项目等模块
 └── references/
     ├── audit-contract.md             # 三引擎与统一证据契约
+    ├── codex-practice-network.md     # 官方与 X 实践知识网络
     ├── collaboration-rubric.md       # 协作语义诊断
     ├── checks.md                     # 稳定检查规则
     ├── privacy.md                    # 隐私边界

@@ -23,6 +23,22 @@ from codex_health.skill_audit import _has_trigger_cue, audit_skills
 
 
 class AuditTest(unittest.TestCase):
+    def test_practice_network_has_sources_routes_and_skill_integration(self):
+        network = (SKILL_ROOT / "references" / "codex-practice-network.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        for index in range(1, 21):
+            self.assertIn(f"PRA{index:03d}", network)
+        for source in ("O01", "O08", "X01", "X03", "X11"):
+            self.assertIn(source, network)
+        self.assertIn("https://x.com/", network)
+        self.assertIn("official-confirmed", network)
+        self.assertIn("高传播万能模板反例", network)
+        self.assertIn("references/codex-practice-network.md", skill)
+        self.assertIn("practice_refs", contract)
+        self.assertIn("recommendation_basis", contract)
+
     def test_audit_contract_defines_engines_evidence_states_and_output(self):
         contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
