@@ -1,6 +1,6 @@
 ---
 name: codex-checkup
-description: 对个人 Codex 工作台做本地、证据驱动的全景体检，并在用户批准后继续整改与同口径复测。审核历史协作、配置、AGENTS.md、Skills、MCP 和可识别项目状态，找出协作弯路、能力漏用、规则冲突、失效配置、未闭环或疑似遗忘项目，再把建议恢复为可执行、可验证、可续接的优化顺序。用户提到 Codex 体检、全面体检、全景体检、使用诊断、聊天复盘、协作返工、配置优化、Skill 清理、AGENTS.md 冲突、项目进度恢复、忘记做到哪里、项目路线复盘、下一步任务排序、按体检结果优化、继续整改、修复第几项或复测优化效果时，都应使用本 Skill。
+description: 对个人 Codex 工作台做本地、证据驱动的全景体检，并在用户批准后继续整改与同口径复测。用人能直接看懂的方式审核历史协作、配置、AGENTS.md、Skills、MCP 和可识别项目状态，重点指出哪些协作流程反复绕路、哪里重复返工、哪些人工流程适合沉淀为 Skill，以及下一次具体应该怎么做。用户提到 Codex 体检、全面体检、全景体检、使用诊断、聊天复盘、协作返工、重复浪费时间、哪些适合做成 Skill、配置优化、Skill 清理、AGENTS.md 冲突、项目进度恢复、忘记做到哪里、项目路线复盘、下一步任务排序、按体检结果优化、继续整改、修复第几项或复测优化效果时，都应使用本 Skill。
 ---
 
 # Codex 全景体检
@@ -42,14 +42,15 @@ python <skill-directory>/scripts/run_audit.py --project <current-project> --days
 6. 生成私有证据包：
 
 ```powershell
-python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --max-samples 12
+python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --max-samples 12 --max-task-samples 100
 ```
 
-7. 明确告诉用户：私有证据包同时包含顺利完成样本和摩擦样本，均为短小、尽力脱敏的聊天片段；读取后这些片段会进入当前 Codex 上下文，但不会写入可分享报告。然后读取 [references/collaboration-rubric.md](references/collaboration-rubric.md) 和 `.codex-health-private/collaboration-evidence.json`。
-8. 分别运行交互协作、Codex 工作台和项目恢复判断。只把 `confirmed_skill_refs` 中的名称写成确认使用；“可能漏用”必须同时有可解析任务语义和匹配的 Skill 描述。按 `agents_inventory` 读取用户级、项目级和嵌套 `AGENTS.md`，比较作用域、重复、冲突和实际执行要求。项目只从会话工作目录、最近项目记录和用户指定目录发现；使用 `recovery_facts` 中的 Git、计划、TODO 和最近活动证据，证据不足时保持 `unknown`，不得用工作区干净推断已完成。
+7. 明确告诉用户：私有证据包包含顺利/摩擦短片段，以及最多 100 个会话的脱敏任务开场清单；读取后它们会进入当前 Codex 上下文，但不会写入可分享报告。然后读取 [references/collaboration-rubric.md](references/collaboration-rubric.md) 和 `.codex-health-private/collaboration-evidence.json`。
+8. 分别运行交互协作、Codex 工作台和项目恢复判断。先读取 `exact_repeat_groups` 定位完全重复任务，再用 `task_inventory` 聚类语义相近的任务和人工步骤，用顺利/摩擦样本解释哪些环节造成返工。只把 `confirmed_skill_refs` 中的名称写成确认使用；“可能漏用”必须同时有可解析任务语义和匹配的 Skill 描述。按 `agents_inventory` 读取用户级、项目级和嵌套 `AGENTS.md`，比较作用域、重复、冲突和实际执行要求。项目只从会话工作目录、最近项目记录和用户指定目录发现；使用 `recovery_facts` 中的 Git、计划、TODO 和最近活动证据，证据不足时保持 `unknown`，不得用工作区干净推断已完成。
 9. 形成观察结论后读取 [references/codex-practice-network.md](references/codex-practice-network.md)，把每项建议路由到最匹配的 `PRAxxx` 节点。区分官方规范、官方 X 新能力、具名实践者经验、普通社区线索和反例；不得把传播量当作正确性证据。
-10. 按契约生成 `health-check.md`。每个结论记录证据等级、置信度、覆盖范围、主要归因、实践节点、建议依据、放置位置、审批边界和验证方法。先讲最值得处理的 3 项，不要用问题数量制造焦虑。
-11. 不要在报告链接处结束回复。明确推荐最先处理的一项，并给出“开始第 1 项 / 只优化协作 / 只优化配置 / 只恢复项目 / 暂不修改”五个后续入口。用户在最初请求中已经明确要求“体检并优化”时，生成报告后直接进入整改预检，不再要求用户重复表达同一意图。
+10. 读取 [references/human-report.md](references/human-report.md)，生成面向人的 `health-check.md` 和机器/审计用的 `health-check-evidence.md`。主报告先讲具体协作流程、重复成本、理想做法和 Skill 候选；证据等级、规则编号、模块状态、实践节点、覆盖路径和完整项目清单全部下沉到证据附录。
+11. 运行 `python <skill-directory>/scripts/validate_human_report.py health-check.md`。校验失败时按错误重写主报告，不能把不合格报告直接交给用户。
+12. 不要在报告链接处结束回复。明确推荐最先处理的一项，并给出“开始第 1 项 / 只优化协作 / 只优化配置 / 只恢复项目 / 暂不修改”五个后续入口。用户在最初请求中已经明确要求“体检并优化”时，生成报告后直接进入整改预检，不再要求用户重复表达同一意图。
 
 ## 三个引擎
 
@@ -57,18 +58,18 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 - **Codex 工作台引擎**：检查配置、用户/项目/嵌套 AGENTS.md、Skills、MCP 的质量、作用域、重复、冲突和实际遵守情况。
 - **项目恢复引擎**：恢复审计范围内项目的目标、状态、未完成项、阻塞、依赖和下一步，不评价项目商业价值。
 
-产品契约见 [references/audit-contract.md](references/audit-contract.md)，整改闭环见 [references/remediation.md](references/remediation.md)，Codex 使用建议见 [references/codex-practice-network.md](references/codex-practice-network.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
+产品契约见 [references/audit-contract.md](references/audit-contract.md)，人话报告格式见 [references/human-report.md](references/human-report.md)，整改闭环见 [references/remediation.md](references/remediation.md)，Codex 使用建议见 [references/codex-practice-network.md](references/codex-practice-network.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
 
 ## 输出要求
 
-回复用户并写入 `health-check.md` 时交付四份结果：
+回复用户并写入 `health-check.md` 时，用人话交付四类结果：
 
-1. **协作诊断**：保留哪些成功模式，哪些协作弯路需要改变，Skill 是否有确认使用、可能漏用或范围内未观察。
-2. **配置诊断**：配置关系、AGENTS.md 作用域与冲突、Skills/MCP 的重复、失效和风险。
-3. **项目恢复地图**：每个可识别项目的证据状态、已完成、未完成、阻塞和下一步。
-4. **建议行动顺序**：按用户目标、阻塞关系、收尾成本、疑似遗忘和系统性影响排序，并说明理由和完成条件。
+1. **协作流程**：哪里反复绕路、出现过几次、为什么会返工、下一次改成什么流程。
+2. **Skill 机会与工作台问题**：哪些重复人工流程适合 Skill，哪些更应放进 AGENTS.md、自动检查或配置；只列真正影响工作的配置问题。
+3. **项目恢复**：优先列出需要继续、验证、解除阻塞或决定去留的项目，不展开冗长的状态不明清单。
+4. **下一步行动**：按用户目标、阻塞关系、收尾成本、疑似遗忘和系统性影响排序，并说明完成条件。
 
-最后说明审计范围、`A/B/C/D/U` 证据分布、建议来源等级和无法判断项。每项优化建议至少列出一个 `PRAxxx`；没有匹配实践时标记为“本地推导”。涉及写配置、删 Skill、归档聊天、关闭项目或修改项目时，先征得用户同意。
+`health-check-evidence.md` 记录审计范围、`A/B/C/D/U`、建议来源、完整项目表和无法判断项。每项优化建议在附录中至少列出一个 `PRAxxx`；没有匹配实践时标记为“本地推导”。涉及写配置、删 Skill、归档聊天、关闭项目或修改项目时，先征得用户同意。
 
 ## 整改闭环
 

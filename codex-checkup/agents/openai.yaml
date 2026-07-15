@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex 全景体检"
-  short_description: "体检并持续优化 Codex 协作、配置和项目状态"
-  default_prompt: "请使用 $codex-checkup 对我的个人 Codex 工作台做一次只读全景体检，输出协作诊断、配置诊断、项目恢复地图和建议行动顺序；结束时推荐最先处理的一项，并给出继续整改入口。"
+  short_description: "用人话找出 Codex 协作弯路、Skill 机会和项目状态"
+  default_prompt: "请使用 $codex-checkup 对我的个人 Codex 工作台做一次只读全景体检。主报告用人话说明哪些协作流程反复绕路、哪里重复返工、哪些工作适合做成 Skill，以及下一次具体怎么改；技术字段放到单独证据附录，并给出继续整改入口。"

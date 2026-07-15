@@ -2,21 +2,22 @@
 
 > **让 Codex 审计 Codex：帮助你升级与 Codex 的协作方式，找出互相打架的规则和做到一半被遗忘的项目，再把下一步执行到验证通过。**
 
-![Version](https://img.shields.io/badge/version-0.9.0-111111)
+![Version](https://img.shields.io/badge/version-0.10.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![Local First](https://img.shields.io/badge/local--first-read--only-2E7D32)
-![Tests](https://img.shields.io/badge/tests-25%20passing-2E7D32)
+![Tests](https://img.shields.io/badge/tests-28%20passing-2E7D32)
 
 `codex-checkup` 是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。
 
 它不再停在报告交付：用户批准后，可以从上次体检继续整改、记录进度，并按相同范围复测问题是否真正消失。
 
-它把指定范围内的历史协作、Codex 配置、`AGENTS.md`、Skills、MCP 和项目现场串成证据链，回答四个真正影响工作的题目：
+它把指定范围内的历史协作、Codex 配置、`AGENTS.md`、Skills、MCP 和项目现场串成证据链，优先回答真正影响工作的题目：
 
-1. 我和 Codex 哪里配合得不好？
-2. 我的配置、规则和 Skills 哪里冲突或失效？
-3. 我现在有哪些项目，它们分别做到哪里？
-4. 下一步应该先做什么，为什么？
+1. 我和 Codex 哪些流程反复绕路，为什么总在同一个地方返工？
+2. 哪些重复人工工作值得做成 Skill，哪些只该写进 `AGENTS.md` 或自动检查？
+3. 我的配置、规则和 Skills 哪里冲突或失效？
+4. 哪些项目需要继续、验证、解除阻塞或决定放弃？
+5. 下一步应该先做什么，具体改成什么流程？
 
 [它解决什么](#它解决什么) · [你会得到什么](#一次体检会得到什么) · [怎样工作](#一个入口三个引擎) · [快速开始](#快速开始) · [当前进度](#当前实现进度)
 
@@ -48,6 +49,8 @@
 | 反复补充验收标准 | 多个相关任务 | 增加返工轮次 | 开始前定义可验证完成条件 |
 | 完成后没有验证 | 工具与交付记录 | 结果不稳定 | 固定增加完成前验证 |
 | 适用 Skill 可能漏触发 | 任务与 Skill 描述 | 重复手工处理 | 调整触发描述并做真实任务测试 |
+
+主报告会把重复工作分成五类：适合新建 Skill、适合优化现有 Skill、应写入 `AGENTS.md`、应交给测试/脚本、证据不足先观察。不会为了显得有价值而硬造 Skill。
 
 ### 2. 配置诊断
 
@@ -108,7 +111,7 @@ flowchart LR
     C --> E["统一证据链"]
     W --> E
     R --> E
-    E --> O1["协作诊断"]
+    E --> O1["协作流程与 Skill 机会"]
     E --> O2["配置诊断"]
     E --> O3["项目恢复地图"]
     E --> O4["建议行动顺序"]
@@ -239,16 +242,19 @@ python .\codex-checkup\scripts\run_audit.py `
 ```powershell
 python .\codex-checkup\scripts\prepare_collaboration_evidence.py `
   --days 30 `
-  --max-samples 12
+  --max-samples 12 `
+  --max-task-samples 100
 ```
 
 基础脚本生成：
 
 - `report.md`：便于阅读的确定性检查结果
 - `report.json`：便于继续分析的结构化数据
-- `.codex-health-private/collaboration-evidence.json`：私有、脱敏的短上下文证据包
+- `.codex-health-private/collaboration-evidence.json`：私有、脱敏的短上下文与任务开场清单
+- `health-check.md`：先讲协作弯路、重复成本、Skill 机会和具体改法的人话主报告
+- `health-check-evidence.md`：覆盖范围、证据等级、完整项目表和规则台账
 
-完整语义体检由 Codex 汇总为 `health-check.md`。私有证据包不应提交或分享。
+私有证据包不应提交或分享。主报告不再以审计覆盖和内部字段开头。
 
 ### 继续优化
 
@@ -268,18 +274,18 @@ Skill 会保持原报告不变，把进度写入 `.codex-health-private/remediat
 
 ## 当前实现进度
 
-`0.9.0` 增加体检后的整改模式、跨任务进度状态和同口径复测，并修复安全检测器扫描自身正则定义造成的 `SKL007` 误报。三个体检引擎与整改动作的自动化程度仍不同。
+`0.10.0` 将输出拆为人话主报告和技术证据附录，并为正常与摩擦会话增加脱敏任务清单，用于识别反复流程和可靠的 Skill 候选。三个体检引擎与整改动作的自动化程度仍不同。
 
 | 能力 | 当前状态 | 已实现 | 仍在建设 |
 | --- | --- | --- | --- |
-| 交互协作 | 可用 | 真实覆盖状态、顺利/摩擦样本、验证工具证据、确认使用的 Skill、增强脱敏 | 语义级漏触发和工作流完整性判断 |
+| 交互协作 | 可用 | 正常/摩擦样本、最多 100 个任务开场、重复流程诊断、Skill 候选分流 | 更强的跨语言任务聚类 |
 | Codex 工作台 | 基础可用 | 配置、Skill/MCP 风险、用户/项目/嵌套 `AGENTS.md` 清单与质量信号 | AGENTS.md 语义冲突和实际遵守关系图 |
 | 项目恢复 | 风险雷达可用 | Git 根归一化、最近活动、分支/工作区、计划文件、TODO 和保守状态 | 聊天承诺与产物对照、测试结果和完整依赖排序 |
-| 统一报告 | 基础可用 | Markdown/JSON、证据等级、覆盖、实践节点、放置位置和复测方式 | 四份语义结果的一键自动汇总 |
+| 人话报告 | 可用 | 协作弯路、重复成本、可复制流程、Skill 机会与独立证据附录 | 更多真实用户报告复测 |
 | 整改闭环 | 可用 | 报告后入口、按行动恢复、私有进度状态、动作验证与同口径复测 | 更多配置类动作的确定性执行器 |
 | 实践知识网络 | 可用 | 20 个实践节点、官方/X 来源分层、症状路由和反例 | 定期刷新与更多真实用户复测 |
 
-当前版本通过 25 项回归测试、Skill 格式校验、对抗夹具和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
+当前版本通过 28 项回归测试、Skill 格式校验、对抗夹具和真实本地会话前向测试。测试通过不代表所有结论都可靠；完整覆盖状态和无法判断项仍会保存在证据附录。
 
 ## 项目结构
 
@@ -290,9 +296,11 @@ codex-checkup/
 ├── scripts/
 │   ├── run_audit.py                 # 确定性基础扫描
 │   ├── prepare_collaboration_evidence.py
+│   ├── validate_human_report.py     # 阻止技术字段回流主报告
 │   └── codex_health/                # 配置、Skills、会话、项目等模块
 └── references/
     ├── audit-contract.md             # 三引擎与统一证据契约
+    ├── human-report.md               # 人话主报告与技术附录分层
     ├── remediation.md                # 整改状态、授权和同口径复测
     ├── codex-practice-network.md     # 官方与 X 实践知识网络
     ├── collaboration-rubric.md       # 协作语义诊断
@@ -306,7 +314,7 @@ codex-checkup/
 - 默认只读，不自动修改配置、聊天、Skills、插件缓存或项目文件
 - 不上传聊天内容，不执行远程分析服务
 - 公开报告不包含密钥、完整私人路径或长聊天原文
-- 深度协作诊断只读取少量、尽力脱敏的必要片段，并明确告知用户
+- 深度协作诊断读取少量脱敏片段和有限任务开场清单，并明确告知用户
 - 只有用户明确选择后才进入整改；删除 Skill、全局配置、Git 写操作和归档项目等高影响动作需要单独确认
 - 不扫描整块磁盘，只检查用户指定范围和可识别项目来源
 

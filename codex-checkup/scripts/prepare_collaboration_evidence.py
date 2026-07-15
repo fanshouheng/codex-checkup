@@ -8,7 +8,7 @@ from codex_health.common import env_codex_home
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="为 Codex 协作诊断生成私有、最小化、脱敏的对话证据包")
+    parser = argparse.ArgumentParser(description="为 Codex 协作诊断生成私有、脱敏的样本与任务清单")
     parser.add_argument("--codex-home", type=Path, default=env_codex_home(), help="Codex 用户目录")
     parser.add_argument("--days", type=int, default=30, help="读取最近天数（1-3650）")
     parser.add_argument("--max-sessions", type=int, default=300, help="最多读取的会话文件数（1-5000）")
@@ -19,6 +19,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=12,
         help="最多保留的对照样本数（1-30）；旧参数 --max-incidents 仍可用",
+    )
+    parser.add_argument(
+        "--max-task-samples",
+        type=int,
+        default=100,
+        help="最多保留的脱敏任务开场数（1-500），用于识别重复流程和 Skill 候选",
     )
     parser.add_argument(
         "--output",
@@ -37,15 +43,19 @@ def main() -> int:
         raise SystemExit("--max-sessions 必须在 1 到 5000 之间")
     if not 1 <= args.max_samples <= 30:
         raise SystemExit("--max-samples 必须在 1 到 30 之间")
+    if not 1 <= args.max_task_samples <= 500:
+        raise SystemExit("--max-task-samples 必须在 1 到 500 之间")
     payload = build_collaboration_evidence(
         args.codex_home.expanduser().resolve(strict=False),
         days=args.days,
         max_sessions=args.max_sessions,
         max_samples=args.max_samples,
+        max_task_samples=args.max_task_samples,
     )
     output = write_collaboration_evidence(args.output.expanduser().resolve(strict=False), payload)
     print(f"evidence_json={output}")
     print(f"sample_count={payload['sample_count']}")
+    print(f"task_inventory_count={len(payload['task_inventory'])}")
     return 0
 
 

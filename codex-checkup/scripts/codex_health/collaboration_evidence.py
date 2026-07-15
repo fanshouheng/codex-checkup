@@ -80,6 +80,10 @@ SUCCESSFUL_TOOL_RE = re.compile(
     re.I,
 )
 UNSUCCESSFUL_TOOL_RE = re.compile(r"(?:\bfailed\b|\b[1-9]\d* errors?\b|\btraceback\b)", re.I)
+WINDOWS_ABSOLUTE_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9:/])(?:[A-Za-z]:[\\/])[^\s\"'<>|?*\r\n]+",
+    re.I,
+)
 
 INCIDENT_PRIORITY = {
     "scope_control": 6,
@@ -249,9 +253,78 @@ def _redact(text: str, codex_home: Path, cwd: str, max_chars: int = 650) -> str:
     for source, replacement in replacements:
         value = re.sub(re.escape(source), replacement, value, flags=re.IGNORECASE)
         value = re.sub(re.escape(source.replace("\\", "/")), replacement, value, flags=re.IGNORECASE)
+    value = WINDOWS_ABSOLUTE_PATH_RE.sub("$PATH", value)
     if len(value) > max_chars:
         value = value[: max_chars - 14].rstrip() + " ...[truncated]"
     return value
+
+
+def _task_inventory_item(
+    session_id: str,
+    cwd: str,
+    messages: list[Message],
+    verified_tool_evidence: bool,
+    confirmed_skill_refs: set[str],
+    codex_home: Path,
+) -> dict[str, Any] | None:
+    user_messages = [message for message in messages if message.role == "user"]
+    if not user_messages:
+        return None
+    signal_counts = Counter(
+        kind
+        for message in user_messages
+        if (kind := _classify_user_message(message.text)) is not None
+    )
+    continue_requests = sum(
+        1 for message in user_messages if CONTINUE_RE.fullmatch(" ".join(message.text.split()))
+    )
+    return {
+        "task_ref": f"TASK-{short_hash(session_id)}",
+        "project": safe_project_label(cwd) if cwd else "unknown",
+        "opening": _redact(user_messages[0].text, codex_home, cwd, max_chars=360),
+        "user_turns": len(user_messages),
+        "assistant_turns": sum(1 for message in messages if message.role == "assistant"),
+        "signal_counts": dict(sorted(signal_counts.items())),
+        "continue_requests": continue_requests,
+        "verification_observed": verified_tool_evidence,
+        "confirmed_skill_refs": sorted(confirmed_skill_refs),
+    }
+
+
+def _exact_repeat_groups(task_inventory: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for task in task_inventory:
+        key = " ".join(str(task["opening"]).casefold().split())
+        grouped[key].append(task)
+
+    result: list[dict[str, Any]] = []
+    for key, tasks in grouped.items():
+        if len(tasks) < 2:
+            continue
+        signal_counts: Counter[str] = Counter()
+        for task in tasks:
+            signal_counts.update(task["signal_counts"])
+        result.append(
+            {
+                "group_ref": f"REPEAT-{short_hash(key)}",
+                "count": len(tasks),
+                "example_opening": tasks[0]["opening"],
+                "projects": sorted({str(task["project"]) for task in tasks}),
+                "task_refs": [str(task["task_ref"]) for task in tasks],
+                "signal_counts": dict(sorted(signal_counts.items())),
+                "verification_observed_count": sum(
+                    1 for task in tasks if task["verification_observed"]
+                ),
+                "confirmed_skill_refs": sorted(
+                    {
+                        str(skill)
+                        for task in tasks
+                        for skill in task["confirmed_skill_refs"]
+                    }
+                ),
+            }
+        )
+    return sorted(result, key=lambda item: (-int(item["count"]), str(item["group_ref"])))
 
 
 def _session_candidates(path: Path, codex_home: Path) -> list[CandidateIncident]:
@@ -380,16 +453,31 @@ def build_collaboration_evidence(
     days: int = 30,
     max_sessions: int = 300,
     max_samples: int = 12,
+    max_task_samples: int = 100,
 ) -> dict[str, Any]:
     files, files_available = _session_file_selection(codex_home, days, max_sessions)
     friction_candidates: list[CandidateIncident] = []
     success_candidates: list[CandidateIncident] = []
     confirmed_skill_refs: set[str] = set()
     sessions_with_messages = 0
+    task_inventory: list[dict[str, Any]] = []
+    task_inventory_available = 0
     for path in files:
-        _, _, messages, _, skill_refs = _read_messages(path)
+        session_id, cwd, messages, verified_tool_evidence, skill_refs = _read_messages(path)
         if messages:
             sessions_with_messages += 1
+            task = _task_inventory_item(
+                session_id,
+                cwd,
+                messages,
+                verified_tool_evidence,
+                skill_refs,
+                codex_home,
+            )
+            if task is not None:
+                task_inventory_available += 1
+                if len(task_inventory) < max_task_samples:
+                    task_inventory.append(task)
         confirmed_skill_refs.update(skill_refs)
         session_candidates = _session_candidates(path, codex_home)
         friction_candidates.extend(item for item in session_candidates if item.kind != "success_pattern")
@@ -415,11 +503,12 @@ def build_collaboration_evidence(
         "successful" if item.kind in {"successful_completion", "success_pattern"} else "friction"
         for item in selected
     )
+    repeat_groups = _exact_repeat_groups(task_inventory)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "private": True,
-        "notice": "Contains short redacted chat excerpts. Reading this file places those excerpts in the current Codex context.",
+        "notice": "Contains short redacted chat excerpts and task openings. Reading this file places them in the current Codex context.",
         "scope": {
             "days": days,
             "session_files_available": files_available,
@@ -428,8 +517,15 @@ def build_collaboration_evidence(
             "sessions_with_messages": sessions_with_messages,
             "max_sessions": max_sessions,
             "max_samples": max_samples,
+            "max_task_samples": max_task_samples,
+            "task_inventory_available": task_inventory_available,
+            "task_inventory_included": len(task_inventory),
+            "task_inventory_truncated": task_inventory_available > len(task_inventory),
+            "exact_repeat_groups": len(repeat_groups),
             "confirmed_skill_refs": sorted(confirmed_skill_refs),
         },
+        "task_inventory": task_inventory,
+        "exact_repeat_groups": repeat_groups,
         "sample_count": len(selected),
         "sample_class_counts": dict(sorted(class_counts.items())),
         "sample_type_counts": dict(sorted(counts.items())),

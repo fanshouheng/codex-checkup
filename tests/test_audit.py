@@ -21,6 +21,7 @@ from codex_health.project_audit import audit_project
 from codex_health.report import build_payload, render_markdown
 from codex_health.session_audit import SessionDataset, SessionStats, audit_sessions
 from codex_health.skill_audit import _has_trigger_cue, audit_skills
+from validate_human_report import validate_report
 
 
 class AuditTest(unittest.TestCase):
@@ -62,6 +63,55 @@ class AuditTest(unittest.TestCase):
         self.assertIn("整改执行", contract)
         self.assertIn("继续整改入口", metadata)
 
+    def test_skill_defines_human_report_and_technical_appendix(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        human_report = (SKILL_ROOT / "references" / "human-report.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
+
+        for phrase in (
+            "反复绕路的协作流程",
+            "哪些重复工作值得做成 Skill",
+            "你现在的流程",
+            "为什么费时间",
+            "health-check-evidence.md",
+        ):
+            self.assertIn(phrase, human_report)
+        for internal_term in ("`complete`", "`A/B/C/D/U`", "`PRAxxx`", "`finding_id`"):
+            self.assertIn(internal_term, human_report)
+        self.assertIn("正文不要出现以下内部表达", human_report)
+        self.assertIn("主报告不要以“审计范围与覆盖”开头", human_report)
+        self.assertIn("references/human-report.md", skill)
+        self.assertIn("health-check-evidence.md", contract)
+
+    def test_human_report_validator_rejects_technical_dump(self):
+        good = """# 你的 Codex 使用复盘
+## 先说结果
+先改重复流程。
+## 1. 反复绕路的协作流程
+说明流程。
+## 2. 哪些重复工作值得做成 Skill
+本轮没有可靠候选。
+## 3. 目前做得好的地方
+保留验证。
+## 4. 配置和规则里真正需要处理的事
+没有高优先问题。
+## 5. 需要继续或收尾的项目
+只列重点项目。
+## 接下来先做什么
+先修第一项。
+[技术证据](health-check-evidence.md)
+"""
+        self.assertEqual([], validate_report(good))
+
+        technical_dump = """# Codex 工作台体检
+## 审计范围与覆盖
+sessions complete，命中 SKL007，依据 PRA010，项目为 $PROJECT。
+"""
+        errors = validate_report(technical_dump)
+        self.assertTrue(any("不能以" in error for error in errors))
+        self.assertTrue(any("规则编号" in error for error in errors))
+        self.assertTrue(any("实践节点" in error for error in errors))
+
     def test_audit_contract_defines_engines_evidence_states_and_output(self):
         contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -81,7 +131,7 @@ class AuditTest(unittest.TestCase):
             "`archived`",
         ):
             self.assertIn(state, contract)
-        for section in ("协作诊断", "配置诊断", "项目恢复地图", "建议行动顺序"):
+        for section in ("反复绕路的协作流程", "哪些重复工作值得做成 Skill", "需要继续或收尾的项目", "接下来先做什么"):
             self.assertIn(section, contract)
         self.assertIn("references/audit-contract.md", skill)
 
@@ -390,6 +440,60 @@ API_TOKEN = "actual-sensitive-value"
             self.assertNotIn("我要检查哪些项目路线不对，哪些流程不对", signal_texts)
             self.assertNotIn("发布时不要被看出来是这个项目改的", signal_texts)
 
+    def test_task_inventory_includes_normal_sessions_and_reports_truncation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            codex_home = Path(temp) / "codex"
+            session_dir = codex_home / "sessions"
+            session_dir.mkdir(parents=True)
+            for index in range(3):
+                rows = [
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "id": f"019f0000-0000-7000-8000-00000000004{index}",
+                            "cwd": str(Path(temp) / f"project-{index}"),
+                        },
+                    },
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "user_message",
+                            "message": f"请整理同一个项目，token=secret-value-{index}",
+                        },
+                    },
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "我会先检查项目现场。"}],
+                        },
+                    },
+                ]
+                (session_dir / f"rollout-019f0000-0000-7000-8000-00000000004{index}.jsonl").write_text(
+                    "\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+                    encoding="utf-8",
+                )
+
+            payload = build_collaboration_evidence(
+                codex_home,
+                days=30,
+                max_sessions=10,
+                max_samples=3,
+                max_task_samples=2,
+            )
+
+            self.assertEqual(3, payload["schema_version"])
+            self.assertEqual(2, len(payload["task_inventory"]))
+            self.assertEqual(3, payload["scope"]["task_inventory_available"])
+            self.assertTrue(payload["scope"]["task_inventory_truncated"])
+            self.assertEqual(3, payload["scope"]["sessions_with_messages"])
+            self.assertTrue(all(item["opening"].startswith("请整理") for item in payload["task_inventory"]))
+            rendered = json.dumps(payload["task_inventory"], ensure_ascii=False)
+            self.assertNotIn("secret-value", rendered)
+            self.assertEqual(1, len(payload["exact_repeat_groups"]))
+            self.assertEqual(2, payload["exact_repeat_groups"][0]["count"])
+
     def test_unverified_assistant_completion_is_not_a_success_sample(self):
         with tempfile.TemporaryDirectory() as temp:
             codex_home = Path(temp) / "codex"
@@ -434,17 +538,21 @@ API_TOKEN = "actual-sensitive-value"
             self.assertNotIn("successful_completion", {item["type"] for item in payload["samples"]})
 
     def test_private_evidence_redacts_pem_jwt_bearer_and_database_url(self):
+        unrelated_path = r"E:\another-project\private\plan.md"
         fixture = (
             "-----BEGIN OPENSSH PRIVATE KEY----- AAAAB3NzaFixture -----END OPENSSH PRIVATE KEY----- "
             "Bearer abcdefghijklmnopqrstuvwxyz123456 "
             "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmaXh0dXJlIn0.signature123456 "
-            "postgresql://admin:super-secret@example.invalid/db"
+            "postgresql://admin:super-secret@example.invalid/db "
+            f"see {unrelated_path}"
         )
         redacted = _redact(fixture, Path.home() / ".codex", "")
         self.assertNotIn("OPENSSH PRIVATE KEY", redacted)
         self.assertNotIn("abcdefghijklmnopqrstuvwxyz123456", redacted)
         self.assertNotIn("eyJhbGci", redacted)
         self.assertNotIn("super-secret", redacted)
+        self.assertNotIn(unrelated_path, redacted)
+        self.assertIn("$PATH", redacted)
 
     def test_portfolio_requires_multiple_evidence_families_for_route_review(self):
         with tempfile.TemporaryDirectory() as temp:
