@@ -28,6 +28,7 @@ HIGH_RISK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 NEGATION_RE = re.compile(r"\b(?:do not|don't|never|must not|avoid)\b|(?:不要|不得|禁止|避免)", re.I)
+PATTERN_DEFINITION_RE = re.compile(r"\b(?:re\.)?compile\s*\(|\bnew\s+RegExp\s*\(", re.I)
 
 
 def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -109,7 +110,7 @@ def safe_project_label(path_text: str) -> str:
 def find_high_risk_text(text: str) -> list[str]:
     hits: set[str] = set()
     for line in text.splitlines():
-        if NEGATION_RE.search(line):
+        if NEGATION_RE.search(line) or PATTERN_DEFINITION_RE.search(line):
             continue
         for label, pattern in HIGH_RISK_PATTERNS:
             if pattern.search(line):

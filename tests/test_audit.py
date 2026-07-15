@@ -40,6 +40,28 @@ class AuditTest(unittest.TestCase):
         self.assertIn("practice_refs", contract)
         self.assertIn("recommendation_basis", contract)
 
+    def test_skill_defines_remediation_resume_and_retest_handoff(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
+        remediation = (SKILL_ROOT / "references" / "remediation.md").read_text(encoding="utf-8")
+        metadata = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
+
+        for phrase in ("继续整改", "修复第几项", "复测优化效果"):
+            self.assertIn(phrase, skill.split("---", 2)[1])
+        for phrase in ("体检模式", "整改模式", "复测模式", "不要在报告链接处结束回复"):
+            self.assertIn(phrase, skill)
+        for phrase in (
+            ".codex-health-private/remediation-state.json",
+            '"status": "pending"',
+            '"retest_outcome": "not_run"',
+            "开始第 1 项",
+            "只优化配置",
+            "只恢复未完成项目",
+        ):
+            self.assertIn(phrase, remediation)
+        self.assertIn("整改执行", contract)
+        self.assertIn("继续整改入口", metadata)
+
     def test_audit_contract_defines_engines_evidence_states_and_output(self):
         contract = (SKILL_ROOT / "references" / "audit-contract.md").read_text(encoding="utf-8")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -551,6 +573,29 @@ description: 处理示例数据
             self.assertNotIn("SKL007", rules)
             broken = next(item for item in result.findings if item.rule_id == "SKL006")
             self.assertIn("1 个断链资源", broken.evidence)
+
+    def test_skill_security_scan_ignores_pattern_definitions_but_flags_real_reads(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "skills"
+            skill_dir = root / "security-check"
+            scripts = skill_dir / "scripts"
+            scripts.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: security-check\ndescription: 当用户要求安全检查时使用。\n---\n",
+                encoding="utf-8",
+            )
+            detector = scripts / "detector.py"
+            detector.write_text(
+                'PATTERN = re.compile(r"\\b(?:cat|read|open)\\b.*(?:\\.env|private_key)")\n',
+                encoding="utf-8",
+            )
+
+            clean = audit_skills(Path(temp) / "codex", Path(temp) / "project", roots=[root])
+            self.assertNotIn("SKL007", {item.rule_id for item in clean.findings})
+
+            detector.write_text('with open(".env") as handle:\n    value = handle.read()\n', encoding="utf-8")
+            risky = audit_skills(Path(temp) / "codex", Path(temp) / "project", roots=[root])
+            self.assertIn("SKL007", {item.rule_id for item in risky.findings})
 
     def test_report_priorities_show_distinct_problem_categories(self):
         duplicate = [

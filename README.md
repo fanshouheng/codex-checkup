@@ -1,13 +1,15 @@
 # Codex Checkup
 
-> **让 Codex 审计 Codex：帮助你升级与 Codex 的协作方式，找出互相打架的规则和做到一半被遗忘的项目，并告诉你接下来最应该先做什么。**
+> **让 Codex 审计 Codex：帮助你升级与 Codex 的协作方式，找出互相打架的规则和做到一半被遗忘的项目，再把下一步执行到验证通过。**
 
-![Version](https://img.shields.io/badge/version-0.8.0-111111)
+![Version](https://img.shields.io/badge/version-0.9.0-111111)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB)
 ![Local First](https://img.shields.io/badge/local--first-read--only-2E7D32)
-![Tests](https://img.shields.io/badge/tests-23%20passing-2E7D32)
+![Tests](https://img.shields.io/badge/tests-25%20passing-2E7D32)
 
 `codex-checkup` 是一个本地优先、默认只读的个人 Codex 工作台审计 Skill。
+
+它不再停在报告交付：用户批准后，可以从上次体检继续整改、记录进度，并按相同范围复测问题是否真正消失。
 
 它把指定范围内的历史协作、Codex 配置、`AGENTS.md`、Skills、MCP 和项目现场串成证据链，回答四个真正影响工作的题目：
 
@@ -248,9 +250,25 @@ python .\codex-checkup\scripts\prepare_collaboration_evidence.py `
 
 完整语义体检由 Codex 汇总为 `health-check.md`。私有证据包不应提交或分享。
 
+### 继续优化
+
+体检完成后可以直接说：
+
+```text
+$codex-checkup 按 health-check.md 的顺序开始优化，先处理第 1 项。
+```
+
+也可以跨任务继续：
+
+```text
+$codex-checkup 继续上次整改，并在本批完成后按原范围复测。
+```
+
+Skill 会保持原报告不变，把进度写入 `.codex-health-private/remediation-state.json`。可逆的限定范围修改按用户选择执行；删除、全局配置、凭据/权限、Git 写操作、推送和项目关闭仍需单独确认。
+
 ## 当前实现进度
 
-`0.8.0` 修复了会话覆盖失真、助手自报成功、项目重复识别和私有证据脱敏缺口，并把 Skill 调用证据、AGENTS.md 指令链、项目恢复事实和统一证据字段接入基础报告。三个引擎的自动化程度仍不同。
+`0.9.0` 增加体检后的整改模式、跨任务进度状态和同口径复测，并修复安全检测器扫描自身正则定义造成的 `SKL007` 误报。三个体检引擎与整改动作的自动化程度仍不同。
 
 | 能力 | 当前状态 | 已实现 | 仍在建设 |
 | --- | --- | --- | --- |
@@ -258,9 +276,10 @@ python .\codex-checkup\scripts\prepare_collaboration_evidence.py `
 | Codex 工作台 | 基础可用 | 配置、Skill/MCP 风险、用户/项目/嵌套 `AGENTS.md` 清单与质量信号 | AGENTS.md 语义冲突和实际遵守关系图 |
 | 项目恢复 | 风险雷达可用 | Git 根归一化、最近活动、分支/工作区、计划文件、TODO 和保守状态 | 聊天承诺与产物对照、测试结果和完整依赖排序 |
 | 统一报告 | 基础可用 | Markdown/JSON、证据等级、覆盖、实践节点、放置位置和复测方式 | 四份语义结果的一键自动汇总 |
+| 整改闭环 | 可用 | 报告后入口、按行动恢复、私有进度状态、动作验证与同口径复测 | 更多配置类动作的确定性执行器 |
 | 实践知识网络 | 可用 | 20 个实践节点、官方/X 来源分层、症状路由和反例 | 定期刷新与更多真实用户复测 |
 
-当前版本通过 23 项回归测试、Skill 格式校验、对抗夹具和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
+当前版本通过 25 项回归测试、Skill 格式校验、对抗夹具和真实本地会话前向测试。测试通过不代表所有结论都可靠；每次报告仍必须显示覆盖状态和无法判断项。
 
 ## 项目结构
 
@@ -274,6 +293,7 @@ codex-checkup/
 │   └── codex_health/                # 配置、Skills、会话、项目等模块
 └── references/
     ├── audit-contract.md             # 三引擎与统一证据契约
+    ├── remediation.md                # 整改状态、授权和同口径复测
     ├── codex-practice-network.md     # 官方与 X 实践知识网络
     ├── collaboration-rubric.md       # 协作语义诊断
     ├── checks.md                     # 稳定检查规则
@@ -287,7 +307,7 @@ codex-checkup/
 - 不上传聊天内容，不执行远程分析服务
 - 公开报告不包含密钥、完整私人路径或长聊天原文
 - 深度协作诊断只读取少量、尽力脱敏的必要片段，并明确告知用户
-- 修复配置、删除 Skill、归档项目或修改代码前，必须重新获得用户授权
+- 只有用户明确选择后才进入整改；删除 Skill、全局配置、Git 写操作和归档项目等高影响动作需要单独确认
 - 不扫描整块磁盘，只检查用户指定范围和可识别项目来源
 
 ## 为什么不提供总分

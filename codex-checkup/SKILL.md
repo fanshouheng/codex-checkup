@@ -1,6 +1,6 @@
 ---
 name: codex-checkup
-description: 对个人 Codex 工作台做本地、只读、证据驱动的全景体检，审核历史协作、配置、AGENTS.md、Skills、MCP 和可识别项目状态，找出协作弯路、能力漏用、规则冲突、失效配置、未闭环或疑似遗忘项目，并恢复经用户确认后可执行的任务顺序。用户提到 Codex 体检、全面体检、全景体检、使用诊断、聊天复盘、协作返工、配置优化、Skill 清理、AGENTS.md 冲突、项目进度恢复、忘记做到哪里、项目路线复盘或下一步任务排序时，都应使用本 Skill。
+description: 对个人 Codex 工作台做本地、证据驱动的全景体检，并在用户批准后继续整改与同口径复测。审核历史协作、配置、AGENTS.md、Skills、MCP 和可识别项目状态，找出协作弯路、能力漏用、规则冲突、失效配置、未闭环或疑似遗忘项目，再把建议恢复为可执行、可验证、可续接的优化顺序。用户提到 Codex 体检、全面体检、全景体检、使用诊断、聊天复盘、协作返工、配置优化、Skill 清理、AGENTS.md 冲突、项目进度恢复、忘记做到哪里、项目路线复盘、下一步任务排序、按体检结果优化、继续整改、修复第几项或复测优化效果时，都应使用本 Skill。
 ---
 
 # Codex 全景体检
@@ -15,7 +15,17 @@ description: 对个人 Codex 工作台做本地、只读、证据驱动的全景
 - 只在当前工作目录写入体检报告。
 - 报告不得包含聊天原文、密钥值、完整环境变量、完整用户名路径或完整配置内容。
 - 配置内部结构和本地会话格式可能随版本变化。无法确认时降低置信度并明确说明覆盖缺口。
-- 优化动作先形成建议。只有用户明确要求修复后，才进入备份、差异预览、用户确认、修改、复测流程。
+- 优化动作先形成建议。只有用户明确要求修复后才进入整改；用户点名的可逆、限定范围修改可以直接执行，高影响动作仍按下文边界单独确认。
+
+## 模式路由
+
+先判断用户要进入哪个阶段，避免每次都从头体检：
+
+- **体检模式**：用户要求检查、诊断、复盘或盘点时，执行完整或限定范围的只读体检。
+- **整改模式**：用户说“开始优化”“按报告处理”“修复第 N 项”或指定某类问题时，读取现有 `health-check.md` 和整改状态，直接继续对应行动。
+- **复测模式**：用户说“重新体检”“验证优化效果”或整改批次完成时，沿用基线报告的时间、项目和模块范围复测。
+
+整改或复测时读取 [references/remediation.md](references/remediation.md)。只有找不到可用基线、基线范围不明或用户要求刷新时，才重新执行完整体检。
 
 ## 体检流程
 
@@ -39,6 +49,7 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 8. 分别运行交互协作、Codex 工作台和项目恢复判断。只把 `confirmed_skill_refs` 中的名称写成确认使用；“可能漏用”必须同时有可解析任务语义和匹配的 Skill 描述。按 `agents_inventory` 读取用户级、项目级和嵌套 `AGENTS.md`，比较作用域、重复、冲突和实际执行要求。项目只从会话工作目录、最近项目记录和用户指定目录发现；使用 `recovery_facts` 中的 Git、计划、TODO 和最近活动证据，证据不足时保持 `unknown`，不得用工作区干净推断已完成。
 9. 形成观察结论后读取 [references/codex-practice-network.md](references/codex-practice-network.md)，把每项建议路由到最匹配的 `PRAxxx` 节点。区分官方规范、官方 X 新能力、具名实践者经验、普通社区线索和反例；不得把传播量当作正确性证据。
 10. 按契约生成 `health-check.md`。每个结论记录证据等级、置信度、覆盖范围、主要归因、实践节点、建议依据、放置位置、审批边界和验证方法。先讲最值得处理的 3 项，不要用问题数量制造焦虑。
+11. 不要在报告链接处结束回复。明确推荐最先处理的一项，并给出“开始第 1 项 / 只优化协作 / 只优化配置 / 只恢复项目 / 暂不修改”五个后续入口。用户在最初请求中已经明确要求“体检并优化”时，生成报告后直接进入整改预检，不再要求用户重复表达同一意图。
 
 ## 三个引擎
 
@@ -46,7 +57,7 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 - **Codex 工作台引擎**：检查配置、用户/项目/嵌套 AGENTS.md、Skills、MCP 的质量、作用域、重复、冲突和实际遵守情况。
 - **项目恢复引擎**：恢复审计范围内项目的目标、状态、未完成项、阻塞、依赖和下一步，不评价项目商业价值。
 
-产品契约见 [references/audit-contract.md](references/audit-contract.md)，Codex 使用建议见 [references/codex-practice-network.md](references/codex-practice-network.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
+产品契约见 [references/audit-contract.md](references/audit-contract.md)，整改闭环见 [references/remediation.md](references/remediation.md)，Codex 使用建议见 [references/codex-practice-network.md](references/codex-practice-network.md)，详细判断规则见 [references/checks.md](references/checks.md)，协作语义诊断见 [references/collaboration-rubric.md](references/collaboration-rubric.md)，隐私约束见 [references/privacy.md](references/privacy.md)，报告解释方式见 [references/reporting.md](references/reporting.md)。
 
 ## 输出要求
 
@@ -59,6 +70,12 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 
 最后说明审计范围、`A/B/C/D/U` 证据分布、建议来源等级和无法判断项。每项优化建议至少列出一个 `PRAxxx`；没有匹配实践时标记为“本地推导”。涉及写配置、删 Skill、归档聊天、关闭项目或修改项目时，先征得用户同意。
 
+## 整改闭环
+
+用户批准优化后，不要只重复建议。读取 `health-check.md`，按 [references/remediation.md](references/remediation.md) 创建或恢复 `.codex-health-private/remediation-state.json`，一次推进一个边界清楚的行动：核验证据、说明改动、执行、验证、记录状态，再推荐下一项。
+
+用户明确说“修复第 N 项”或点名行动时，视为批准该行动的可逆、限定范围修改。删除、覆盖用户数据、修改凭据/权限、清理全局配置、初始化或提交 Git、推送、归档或关闭项目仍需单独确认。不要把“建议优化全部”解释为这些高影响动作的批量授权。
+
 ## 复测
 
 用户批准并完成优化后，用相同的 `--days`、`--project` 和模块范围再次运行。只比较同口径指标，并记录：
@@ -67,3 +84,5 @@ python <skill-directory>/scripts/prepare_collaboration_evidence.py --days 30 --m
 - 哪项能力被保留
 - 哪些问题仍未解决
 - 是否出现新的副作用
+
+只有动作验证通过时才标记 `verified`；只有同口径复测确认原发现消失或降级时才标记 `resolved`。复测后继续给出仍存在、新增和无法比较的问题，不用健康分数掩盖差异。
